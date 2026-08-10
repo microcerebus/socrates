@@ -49,6 +49,7 @@ export interface InterviewTurnOptions {
   /** Where the tokens come from. See `providers.ts`. */
   stream: ProviderStream;
   onText(text: string): void;
+  onStarted?(): void;
   onThinking?(): void;
   signal?: AbortSignal;
 }
@@ -62,6 +63,7 @@ export async function runInterviewTurn(options: InterviewTurnOptions): Promise<v
     system: buildSystemPrompt({ rung: request.rung, language: request.snapshot.editor.language }),
     messages: toApiMessages(request),
     ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.onStarted ? { onStarted: options.onStarted } : {}),
     ...(options.onThinking ? { onThinking: options.onThinking } : {}),
     onText: (text) => {
       const safe = guard.push(text);

@@ -18,6 +18,14 @@ export interface ProviderRequest {
   /** Oldest first. The last entry is always the current user turn. */
   messages: ApiMessage[];
   onText(text: string): void;
+  /**
+   * The transport is up and the model turn is genuinely under way. Both
+   * providers have a moment that means this - the CLI's init frame, and the
+   * API's `message_start` - so the panel can tell "still connecting" from
+   * "thinking" identically either way.
+   */
+  onStarted?(): void;
+  /** Repeated for as long as the model thinks without producing text. */
   onThinking?(): void;
   signal?: AbortSignal;
 }
@@ -33,6 +41,7 @@ export function apiKeyProvider(options: { apiKey: string; fetchImpl?: typeof fet
       system: request.system,
       messages: request.messages,
       onText: request.onText,
+      ...(request.onStarted ? { onStarted: request.onStarted } : {}),
       ...(request.onThinking ? { onThinking: request.onThinking } : {}),
       ...(request.signal ? { signal: request.signal } : {}),
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
@@ -77,6 +86,7 @@ export function claudeCodeProvider(options: { connect?: NativeConnect } = {}): P
       system: request.system,
       prompt: flattenMessages(request.messages),
       onText: request.onText,
+      ...(request.onStarted ? { onStarted: request.onStarted } : {}),
       ...(request.onThinking ? { onThinking: request.onThinking } : {}),
       ...(request.signal ? { signal: request.signal } : {}),
       ...(options.connect ? { connect: options.connect } : {}),

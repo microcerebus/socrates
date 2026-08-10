@@ -65,7 +65,17 @@ export function buildRequestBody(model: ModelId, system: string, messages: ApiMe
 
 export interface StreamHandlers {
   onText(text: string): void;
-  /** Fired once when the model starts an (unsurfaced) thinking block. */
+  /**
+   * Fired once, on `message_start`: the request is answered and the turn is
+   * genuinely under way. The Claude Code provider's init frame means the same
+   * thing, which is what lets the panel show one honest set of phases for both.
+   */
+  onStarted?(): void;
+  /**
+   * A liveness pulse, repeated for every thinking delta. It carries no text and
+   * must not: thinking is a draft of the answer, and the rung ladder exists to
+   * withhold exactly that.
+   */
   onThinking?(): void;
 }
 
@@ -155,7 +165,7 @@ export async function streamMessage(options: StreamOptions): Promise<void> {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let pending = '';
-  let sawThinking = false;
+  let sawStarted = false;
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -179,8 +189,14 @@ export async function streamMessage(options: StreamOptions): Promise<void> {
       if (event.type === 'error') {
         throw appError('api-error', event.error?.message ?? 'The Anthropic stream reported an error.');
       }
-      if (event.type === 'content_block_start' && event.content_block?.type === 'thinking' && !sawThinking) {
-        sawThinking = true;
+      if (event.type === 'message_start' && !sawStarted) {
+        sawStarted = true;
+        options.onStarted?.();
+      }
+      if (event.type === 'content_block_start' && event.content_block?.type === 'thinking') {
+        options.onThinking?.();
+      }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
         options.onThinking?.();
       }
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {

@@ -39,6 +39,13 @@ export type HostResponse =
   | { ok: true; kind: 'pong'; itemTitle: string; claudePath: string | null }
   | { ok: true; kind: 'api-key'; apiKey: string }
   | { ok: true; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
+  /** Sent once, when the CLI is up and about to call the API. */
+  | { ok: true; kind: 'claude-started'; requestId: string }
+  /**
+   * A liveness pulse, repeated while the model thinks and throttled by the
+   * runner. It carries no text and never will: thinking content is a draft of
+   * the answer, which the rung ladder exists to withhold. See `claude.ts`.
+   */
   | { ok: true; kind: 'claude-thinking'; requestId: string }
   | { ok: true; kind: 'claude-delta'; requestId: string; text: string }
   | { ok: true; kind: 'claude-done'; requestId: string }
