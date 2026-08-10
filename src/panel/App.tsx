@@ -28,6 +28,7 @@ import {
   type ProbeState,
 } from './components.tsx';
 import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
+import { createSessionWriter } from './session-writer.ts';
 import { createSettingsWriter } from './settings-writer.ts';
 import { IDLE_PROGRESS, TIMEOUT_AFTER_MS, applyEvent, beginTurn, type TurnProgress } from './turn-progress.ts';
 import { REVEAL_WINDOW_MS, createTypewriter, type Typewriter } from './typewriter.ts';
@@ -105,6 +106,14 @@ export function App(): ReactNode {
   // newest one rather than against whatever this render closed over.
   const settingsWriter = useMemo(
     () => createSettingsWriter({ save: (next) => client.setSettings(next), onSettings: setSettings, onError: setError }),
+    [client],
+  );
+
+  // Holds the discard decision outside React, so a `pagehide` between the click
+  // and the re-render cannot write a thrown-away session back. See
+  // `session-writer.ts`.
+  const sessionWriter = useMemo(
+    () => createSessionWriter({ save: (next) => client.saveSession(next), clear: (slug) => client.clearSession(slug) }),
     [client],
   );
 
@@ -188,12 +197,8 @@ export function App(): ReactNode {
   );
 
   const saveSession = useCallback(
-    (overrides: Partial<StoredSession> = {}) => {
-      const session = buildSession(overrides);
-      if (session === null || session.turns.length === 0) return;
-      void client.saveSession(session).catch(() => undefined);
-    },
-    [buildSession, client],
+    (overrides: Partial<StoredSession> = {}) => sessionWriter.save(buildSession(overrides)),
+    [buildSession, sessionWriter],
   );
 
   /*
@@ -285,6 +290,10 @@ export function App(): ReactNode {
         return;
       }
 
+      // Whatever the panel holds from here on is new work, not the remains of a
+      // session the user discarded, so saving is meaningful again.
+      sessionWriter.beginTurn(current.problem.slug);
+
       const deepest = Math.max(deepestRung, targetRung) as Rung;
       setError(null);
       setBusy(true);
@@ -349,7 +358,7 @@ export function App(): ReactNode {
         },
       });
     },
-    [client, deepestRung, freshSnapshot, pace, persistAttempt, reducedMotion, saveSession, sessionStart, stopPacing, turns],
+    [client, deepestRung, freshSnapshot, pace, persistAttempt, reducedMotion, saveSession, sessionStart, sessionWriter, stopPacing, turns],
   );
 
   /*
@@ -395,8 +404,29 @@ export function App(): ReactNode {
     setResumable(null);
   };
 
+  /*
+   * Starting over has to clear memory and storage together, or it does not
+   * really clear anything: the panel still holds the old transcript, and the
+   * next save - a finished turn, or just closing the panel - writes it back over
+   * the storage that was cleared a moment ago.
+   *
+   * The writer's `discard` is what makes it atomic. Every `setState` below is
+   * scheduled rather than applied, so a `pagehide` in the meantime would still
+   * read the old values out of this render's closure; `discard` refuses that
+   * write synchronously, in this same tick, and keeps refusing until a new turn
+   * begins for the slug.
+   */
   const onStartFresh = (session: StoredSession): void => {
-    void client.clearSession(session.slug).catch(() => undefined);
+    sessionWriter.discard(session.slug);
+    const startedAt = Date.now();
+    setTurns([]);
+    setRung(0);
+    setDeepestRung(0);
+    setStarted(false);
+    setStreaming(null);
+    setSessionStart(startedAt);
+    setAttemptStartedAt(nowIso(startedAt));
+    setNow(startedAt);
     setResumable(null);
   };
 

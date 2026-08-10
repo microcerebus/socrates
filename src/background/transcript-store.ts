@@ -108,6 +108,37 @@ export function normaliseSession(session: StoredSession): StoredSession {
   return { ...session, turns: turns.slice(first) };
 }
 
+/**
+ * Every mutation runs one at a time, and reads its own copy of the record.
+ *
+ * The whole store is one `chrome.storage.local` key, so a write is inherently
+ * read-modify-write over the *whole* record: get, change one slug, set it all
+ * back. Two of those in flight at once both read the same "before" and the
+ * second `set` silently discards the first slug's work - and the panel really
+ * does overlap them, because a finished turn saves at the same moment a
+ * `pagehide` does, and "start fresh" clears while a save may still be landing.
+ *
+ * The fix is the one `settings-writer.ts` already uses for the same class of
+ * bug: one promise chain, in call order. The load-bearing detail is that
+ * `readSessions()` is called *inside* the queued work rather than before it, so
+ * each mutation merges into whatever the previous one actually wrote. Reads go
+ * through the queue too, so a resume offer can never be built from a record that
+ * a queued clear is about to invalidate.
+ *
+ * A rejected operation must not wedge the chain, hence the same handler on both
+ * settle paths; each caller still sees its own rejection.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+
+function enqueue<T>(work: () => Promise<T>): Promise<T> {
+  const run = queue.then(work, work);
+  queue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 async function readSessions(): Promise<SessionsBySlug> {
   const stored = await chrome.storage.local.get(SESSIONS_KEY);
   const value = stored[SESSIONS_KEY];
@@ -129,26 +160,36 @@ export function pruneSessions(all: SessionsBySlug): SessionsBySlug {
   return Object.fromEntries(entries.slice(0, MAX_SESSIONS));
 }
 
-export async function getSession(slug: string): Promise<StoredSession | null> {
-  const all = await readSessions();
-  return all[slug] ?? null;
+export function getSession(slug: string): Promise<StoredSession | null> {
+  return enqueue(async () => {
+    const all = await readSessions();
+    return all[slug] ?? null;
+  });
 }
 
-export async function saveSession(session: StoredSession): Promise<StoredSession> {
+export function saveSession(session: StoredSession): Promise<StoredSession> {
+  // Validating and clamping are pure, so they happen up front: a caller passing
+  // nonsense should be rejected without taking a turn in the queue.
   const coerced = coerceSession(session);
-  if (coerced === null) throw new Error('Refusing to save a session without a slug and a start time.');
-
+  if (coerced === null) {
+    return Promise.reject(new Error('Refusing to save a session without a slug and a start time.'));
+  }
   const normalised = normaliseSession(coerced);
-  const all = await readSessions();
-  all[normalised.slug] = normalised;
-  await chrome.storage.local.set({ [SESSIONS_KEY]: pruneSessions(all) });
-  return normalised;
+
+  return enqueue(async () => {
+    const all = await readSessions();
+    all[normalised.slug] = normalised;
+    await chrome.storage.local.set({ [SESSIONS_KEY]: pruneSessions(all) });
+    return normalised;
+  });
 }
 
-export async function clearSession(slug: string): Promise<null> {
-  const all = await readSessions();
-  if (!(slug in all)) return null;
-  delete all[slug];
-  await chrome.storage.local.set({ [SESSIONS_KEY]: all });
-  return null;
+export function clearSession(slug: string): Promise<null> {
+  return enqueue(async () => {
+    const all = await readSessions();
+    if (!(slug in all)) return null;
+    delete all[slug];
+    await chrome.storage.local.set({ [SESSIONS_KEY]: all });
+    return null;
+  });
 }

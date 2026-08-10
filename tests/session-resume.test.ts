@@ -24,19 +24,28 @@ import {
   pruneSessions,
   saveSession,
 } from '../src/background/transcript-store.ts';
+import { createSessionWriter } from '../src/panel/session-writer.ts';
 import { hintsUsedFor } from '../src/prompt/rungs.ts';
 import type { Rung, StoredSession, Turn } from '../src/shared/types.ts';
 
-/** A `chrome.storage.local` that lives and dies with the test. */
+/**
+ * A `chrome.storage.local` that lives and dies with the test.
+ *
+ * `get` deliberately settles on a later macrotask rather than immediately. The
+ * store is one read-modify-write over a single key, so a same-tick stub hides
+ * the interleaving that a real extension hits every time a finished turn and a
+ * `pagehide` save land together - which is exactly the bug the queue exists for.
+ */
 function stubChrome(): Record<string, unknown> {
   const store: Record<string, unknown> = {};
+  const later = <T>(value: T): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(value), 0));
   (globalThis as { chrome?: unknown }).chrome = {
     storage: {
       local: {
-        get: (key: string) => Promise.resolve(key in store ? { [key]: store[key] } : {}),
+        get: (key: string) => later(key in store ? { [key]: store[key] } : {}),
         set: (values: Record<string, unknown>) => {
           Object.assign(store, values);
-          return Promise.resolve();
+          return later(undefined);
         },
       },
     },
@@ -215,5 +224,180 @@ describe('the storage bounds', () => {
 
   it('refuses to save something it could not read back', async () => {
     await expect(saveSession({ ...session(), slug: '' })).rejects.toThrow();
+  });
+});
+
+/**
+ * The store is one read-modify-write over a single key, and the panel really
+ * does overlap those: a finished turn saves at the same moment `pagehide` does,
+ * and "start fresh" clears while a save may still be in flight. Unserialised,
+ * the second `set` discards whatever the first one wrote.
+ */
+describe('overlapping mutations', () => {
+  it('keeps both when two different problems are saved at once', async () => {
+    await Promise.all([
+      saveSession(session({ slug: 'two-sum' })),
+      saveSession(session({ slug: 'valid-parentheses', rung: 5, deepestRung: 5 })),
+      saveSession(session({ slug: 'lru-cache', rung: 3, deepestRung: 3 })),
+    ]);
+
+    expect(await getSession('two-sum')).not.toBeNull();
+    expect((await getSession('valid-parentheses'))?.rung).toBe(5);
+    expect((await getSession('lru-cache'))?.rung).toBe(3);
+  });
+
+  it('lets the last write to one problem win rather than an arbitrary one', async () => {
+    await Promise.all([
+      saveSession(session({ rung: 1, deepestRung: 1, updatedAt: 1 })),
+      saveSession(session({ rung: 4, deepestRung: 4, updatedAt: 2 })),
+    ]);
+    expect((await getSession('two-sum'))?.rung).toBe(4);
+  });
+
+  it('does not resurrect a cleared problem when another save overlaps it', async () => {
+    await saveSession(session({ slug: 'two-sum' }));
+    await saveSession(session({ slug: 'lru-cache' }));
+
+    // "Start fresh" on one problem while a save for another is still landing.
+    await Promise.all([clearSession('two-sum'), saveSession(session({ slug: 'lru-cache', rung: 2 }))]);
+
+    expect(await getSession('two-sum')).toBeNull();
+    expect((await getSession('lru-cache'))?.rung).toBe(2);
+  });
+
+  it('does not resurrect anything when a clear overlaps a prune', async () => {
+    // Fill past the cap so the next save prunes, then clear while it does.
+    for (let i = 0; i < MAX_SESSIONS; i += 1) await saveSession(session({ slug: `p-${i}`, updatedAt: 1_000 + i }));
+
+    await Promise.all([
+      clearSession('p-5'),
+      saveSession(session({ slug: 'newcomer', updatedAt: 9_999 })),
+      clearSession('p-6'),
+    ]);
+
+    expect(await getSession('p-5')).toBeNull();
+    expect(await getSession('p-6')).toBeNull();
+    expect(await getSession('newcomer')).not.toBeNull();
+  });
+
+  it('keeps serving later callers after one operation rejects', async () => {
+    const bad = saveSession({ ...session(), slug: '' }).catch(() => 'rejected');
+    const good = saveSession(session({ slug: 'still-works' }));
+    expect(await bad).toBe('rejected');
+    await good;
+    expect(await getSession('still-works')).not.toBeNull();
+  });
+});
+
+/**
+ * "Start fresh" has to clear memory and storage together. Resetting React state
+ * is not enough on its own, because a `setState` is scheduled rather than
+ * applied - anything running before the next render still reads the old
+ * transcript out of a render closure and writes it back over the storage that
+ * was just cleared. `createSessionWriter` is where that decision lives so it can
+ * be made synchronously, and tested without a renderer.
+ */
+describe('discarding a session', () => {
+  function writer(): {
+    writer: ReturnType<typeof createSessionWriter>;
+    saved: StoredSession[];
+    cleared: string[];
+  } {
+    const saved: StoredSession[] = [];
+    const cleared: string[] = [];
+    return {
+      writer: createSessionWriter({
+        save: (s) => {
+          saved.push(s);
+          return Promise.resolve(s);
+        },
+        clear: (slug) => {
+          cleared.push(slug);
+          return Promise.resolve(null);
+        },
+      }),
+      saved,
+      cleared,
+    };
+  }
+
+  it('saves an ordinary session', () => {
+    const { writer: w, saved } = writer();
+    w.save(session());
+    expect(saved).toHaveLength(1);
+  });
+
+  it('does not spend a write on a session with nothing in it', () => {
+    const { writer: w, saved } = writer();
+    w.save(session({ turns: [] }));
+    w.save(null);
+    expect(saved).toHaveLength(0);
+  });
+
+  /* The reported bug, in one test: start fresh, then close the panel. */
+  it('refuses the save that a pagehide would fire after start fresh', () => {
+    const { writer: w, saved, cleared } = writer();
+    w.discard('two-sum');
+    // The panel's React state has not caught up yet, so this still describes the
+    // discarded conversation.
+    w.save(session({ rung: 4, deepestRung: 4 }));
+
+    expect(cleared).toEqual(['two-sum']);
+    expect(saved).toHaveLength(0);
+  });
+
+  it('refuses it synchronously, before the clear round trip has settled', () => {
+    let releaseClear = (): void => undefined;
+    const saved: StoredSession[] = [];
+    const w = createSessionWriter({
+      save: (s) => {
+        saved.push(s);
+        return Promise.resolve(s);
+      },
+      clear: () => new Promise((resolve) => (releaseClear = () => resolve(null))),
+    });
+
+    w.discard('two-sum');
+    w.save(session());
+    expect(saved).toHaveLength(0);
+    releaseClear();
+  });
+
+  it('still saves a different problem after one is discarded', () => {
+    const { writer: w, saved } = writer();
+    w.discard('two-sum');
+    w.save(session({ slug: 'lru-cache' }));
+    expect(saved).toHaveLength(1);
+  });
+
+  it('saves again once a new turn has begun on the discarded problem', () => {
+    const { writer: w, saved } = writer();
+    w.discard('two-sum');
+    w.beginTurn('two-sum');
+    w.save(session({ rung: 1, deepestRung: 1 }));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.rung).toBe(1);
+    expect(w.discarded).toBeNull();
+  });
+
+  it('is not un-discarded by a turn on some other problem', () => {
+    const { writer: w, saved } = writer();
+    w.discard('two-sum');
+    w.beginTurn('lru-cache');
+    w.save(session());
+    expect(saved).toHaveLength(0);
+  });
+
+  /* Start fresh, close the panel, reopen: nothing should come back. */
+  it('leaves storage empty across a close and reopen', async () => {
+    await saveSession(session({ rung: 4, deepestRung: 4 }));
+    const w = createSessionWriter({ save: saveSession, clear: clearSession });
+
+    w.discard('two-sum');
+    w.save(session({ rung: 4, deepestRung: 4 })); // the pagehide save
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(await getSession('two-sum')).toBeNull();
   });
 });
