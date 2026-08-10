@@ -16,7 +16,7 @@ import {
 } from '../shared/protocol.ts';
 import { appError, type AppError, type PageSnapshot } from '../shared/types.ts';
 import { runInterviewTurn } from './interview.ts';
-import { getApiKey } from './keychain.ts';
+import { getApiKey, getVaultItemTitle } from './keychain.ts';
 import { getAttempts, getSettings, recordAttempt, setSettings } from './session-store.ts';
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -151,6 +151,12 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'probe-key':
         void getApiKey()
           .then(() => send({ kind: 'key-ok' }))
+          .catch(fail);
+        break;
+
+      case 'vault-info':
+        void getVaultItemTitle()
+          .then((itemTitle) => send({ kind: 'vault-info', itemTitle }))
           .catch(fail);
         break;
     }

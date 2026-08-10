@@ -241,12 +241,15 @@ export function Composer({
 export function SettingsPanel({
   model,
   keyState,
+  vaultItemTitle,
   onSelectModel,
   onProbeKey,
   onClose,
 }: {
   model: ModelId;
   keyState: 'unknown' | 'checking' | 'ok' | 'failed';
+  /** Which Dashlane item the native host reads, or null while unknown. */
+  vaultItemTitle: string | null;
   onSelectModel: (model: ModelId) => void;
   onProbeKey: () => void;
   onClose: () => void;
@@ -281,6 +284,16 @@ export function SettingsPanel({
       <p className="small">
         Read from your Dashlane vault at session start through a native helper, and held in the service worker&rsquo;s
         memory only. It is never written to extension storage or to disk.
+      </p>
+      <p className="small">
+        Dashlane item:{' '}
+        {vaultItemTitle === null ? (
+          <em>checking&hellip;</em>
+        ) : (
+          <code>{vaultItemTitle}</code>
+        )}
+        <br />
+        Change it in <code>~/.config/socrates/native-host.json</code>.
       </p>
       <div className="ladder-row">
         <button type="button" onClick={onProbeKey} disabled={keyState === 'checking'}>

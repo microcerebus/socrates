@@ -48,6 +48,7 @@ export function App(): ReactNode {
   const [error, setError] = useState<AppError | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [keyState, setKeyState] = useState<KeyState>('unknown');
+  const [vaultItemTitle, setVaultItemTitle] = useState<string | null>(null);
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -194,6 +195,19 @@ export function App(): ReactNode {
       .catch((failure: AppError) => setError(failure));
   };
 
+  // Loaded when Settings opens, so the panel can name the configured Dashlane
+  // item instead of the extension hardcoding a vault path anywhere.
+  const openSettings = (): void => {
+    const opening = !showSettings;
+    setShowSettings(opening);
+    if (opening && vaultItemTitle === null) {
+      void client
+        .vaultItemTitle()
+        .then(setVaultItemTitle)
+        .catch(() => setVaultItemTitle('unknown (the native helper did not answer)'));
+    }
+  };
+
   const onProbeKey = (): void => {
     setKeyState('checking');
     client
@@ -214,7 +228,7 @@ export function App(): ReactNode {
         elapsedMs={elapsedMs}
         rung={rung}
         attempts={attempts}
-        onOpenSettings={() => setShowSettings((open) => !open)}
+        onOpenSettings={openSettings}
       />
 
       {error ? <ErrorNotice error={error} onDismiss={() => setError(null)} /> : null}
@@ -232,6 +246,7 @@ export function App(): ReactNode {
         <SettingsPanel
           model={settings.model}
           keyState={keyState}
+          vaultItemTitle={vaultItemTitle}
           onSelectModel={onSelectModel}
           onProbeKey={onProbeKey}
           onClose={() => setShowSettings(false)}

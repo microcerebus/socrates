@@ -170,6 +170,14 @@ Haiku 4.5 predates both parameters and rejects them, so they are omitted for it 
 Replies stream token by token; while the model is thinking, the panel says so rather than sitting blank.
 
 **Test vault access** in the settings sheet runs the key fetch on its own, so you can check the Dashlane path without starting a session.
+The sheet also shows which Dashlane item the native host is configured to read, so nothing in the extension has to hardcode a vault path.
+
+## Appearance
+
+Dark is the primary scheme, because LeetCode practice usually happens in dark mode; light is the verified secondary.
+The panel follows `prefers-color-scheme` with no toggle.
+Every colour in `src/panel/styles.css` comes from a token defined in one of the two palette blocks, and every foreground/background pair in use clears WCAG AA in both schemes.
+Both schemes were checked visually before shipping, including chat bubbles, ladder states, disabled buttons, error and remedy panels, and code blocks.
 
 ## How the API key is handled
 
@@ -181,6 +189,11 @@ This is the one hard rule in the project.
 - The native host writes nothing but framed JSON on stdout, and never logs the key.
 - If `dcli` is missing, the vault is locked, or the item does not exist, the panel shows what went wrong and the exact command to fix it.
   It never fails silently.
+- The host reads the key first and only classifies afterwards.
+  `dcli` has no machine-readable output, so the success path depends on nothing but the exit code and stdout of `dcli read`.
+  `dcli status` is consulted only after a read has already failed, to pick the friendliest accurate message, and it is parsed as `key: value` lines.
+  If that output stops being recognisable, the host says so and quotes `dcli`'s own stderr rather than guessing: a confidently wrong "your vault is locked" is worse than an honest "this is what dcli said".
+  `tests/dcli-contract.test.ts` runs against the real CLI when it is installed, so a wording change fails `pnpm check` on a dev machine instead of surfacing as a mystery error later.
 - `.gitignore` defensively excludes `.env*`, `*.pem`, `*.key`, and `native-host.json`.
 
 Calls to `api.anthropic.com` go out from the service worker with the `anthropic-dangerous-direct-browser-access` header, which the API requires for browser-origin requests.
@@ -212,7 +225,8 @@ The native host is a sixth artefact built for Node.
 | --- | --- |
 | `tests/prompt-gating.test.ts` | Rung gating in the prompt, the request body, and code redaction end to end against a mocked Anthropic API |
 | `tests/scraper.test.ts` | The scraper against saved LeetCode HTML: current layout, a drifted layout, and an unrecognisable one |
-| `tests/native-host.test.ts` | Native messaging framing, config parsing, and every vault failure branch against a fake `dcli` |
+| `tests/native-host.test.ts` | Native messaging framing, config parsing, status parsing, and every vault failure branch against a fake `dcli` |
+| `tests/dcli-contract.test.ts` | That the real `dcli status` still emits the lines the classifier reads. Skipped when `dcli` is not installed |
 
 The problem bodies in `tests/fixtures/` are the real ones from LeetCode's public GraphQL endpoint; the page markup around them mirrors the live description tab.
 

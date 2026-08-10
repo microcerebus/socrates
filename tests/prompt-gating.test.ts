@@ -17,7 +17,7 @@ import { buildUserTurn } from '../src/prompt/context.ts';
 import { RUNGS, TECHNIQUE_NAMES, TOTAL_HINTS } from '../src/prompt/rungs.ts';
 import { WITHHELD_NOTICE, redactCode } from '../src/prompt/spoiler-guard.ts';
 import { SYSTEM_PROMPT_VERSION, buildSystemPrompt } from '../src/prompt/system-prompt.ts';
-import type { ModelId, Rung } from '../src/shared/types.ts';
+import type { AppError, ModelId, Rung } from '../src/shared/types.ts';
 import { SNAPSHOT, askRequest, mockAnthropic, sseBody } from './helpers.ts';
 
 const ALL_RUNGS: Rung[] = [0, 1, 2, 3, 4, 5];
@@ -227,17 +227,26 @@ describe('an interview turn end to end', () => {
     expect(seen[0]).toBe('thinking');
   });
 
-  it('surfaces an auth failure with something to do about it', async () => {
+  it('surfaces an auth failure with something to do about it, and no hardcoded vault path', async () => {
     const mock = mockAnthropic(JSON.stringify({ error: { message: 'invalid x-api-key' } }), { status: 401 });
-    await expect(
-      runInterviewTurn({
-        apiKey: 'sk-bad',
-        model: 'claude-sonnet-5',
-        request: askRequest(),
-        onText: () => undefined,
-        fetchImpl: mock.impl,
-      }),
-    ).rejects.toMatchObject({ code: 'api-auth', remedies: [{ command: expect.stringContaining('dcli read') }] });
+    const failure = await runInterviewTurn({
+      apiKey: 'sk-bad',
+      model: 'claude-sonnet-5',
+      request: askRequest(),
+      onText: () => undefined,
+      fetchImpl: mock.impl,
+    }).then(
+      () => null,
+      (error: AppError) => error,
+    );
+
+    expect(failure).toMatchObject({ code: 'api-auth', remedies: [{ command: 'dcli sync' }] });
+    // The Dashlane item is configurable in the native host config, so nothing in
+    // the extension may name one.
+    const surface = JSON.stringify(failure);
+    expect(surface).not.toContain('dl://');
+    expect(surface).not.toContain('Anthropic API Key');
+    expect(failure?.message).toContain('Settings');
   });
 });
 

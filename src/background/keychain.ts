@@ -84,6 +84,28 @@ async function fetchFromVault(send: NativeSend): Promise<string> {
 }
 
 /**
+ * Which Dashlane item the native host is configured to read. Non-secret, and the
+ * only reason the panel can talk about "the item in Settings" without the
+ * extension hardcoding a vault path.
+ */
+export async function getVaultItemTitle(send: NativeSend = defaultSend): Promise<string> {
+  let raw: unknown;
+  try {
+    raw = await send(NATIVE_HOST_NAME, { kind: 'ping' });
+  } catch (cause) {
+    throw appError(
+      'native-host-missing',
+      `Socrates could not reach its native helper (${NATIVE_HOST_NAME}). (${String(cause)})`,
+      [{ label: 'Run from the repo root', command: INSTALL_COMMAND }],
+    );
+  }
+  if (!isHostResponse(raw)) throw appError('key-fetch-failed', 'The native helper returned something unexpected.');
+  if (!raw.ok) throw hostFailureToAppError(raw);
+  if (raw.kind !== 'pong') throw appError('key-fetch-failed', 'The native helper did not identify its vault item.');
+  return raw.itemTitle;
+}
+
+/**
  * Returns the API key, reading the vault at most once per worker lifetime.
  * Concurrent callers share one in-flight vault read.
  */

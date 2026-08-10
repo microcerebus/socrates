@@ -92,10 +92,13 @@ function mapHttpError(status: number, body: string): AppError {
     /* keep the raw body */
   }
   if (status === 401 || status === 403) {
+    // The Dashlane item is configurable in the native host's config, so the
+    // extension must not name a path here. Settings shows which item is in use.
     return appError(
       'api-auth',
-      `Anthropic rejected the API key (${status}). ${detail}`,
-      [{ label: 'Check the key stored in Dashlane', command: 'dcli read "dl://Anthropic API Key/content" | head -c 12' }],
+      `Anthropic rejected the API key (${status}). Check that the Dashlane item shown in Settings holds a current ` +
+        `key. If you rotated it recently, sync your local vault first, then reload the extension. ${detail}`,
+      [{ label: 'Refresh your local vault copy', command: 'dcli sync' }],
     );
   }
   if (status === 429) {

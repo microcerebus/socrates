@@ -96,6 +96,13 @@ export class PortClient {
     );
   }
 
+  vaultItemTitle(): Promise<string> {
+    return this.#once(
+      (id) => ({ id, kind: 'vault-info' }),
+      (frame) => (frame.kind === 'vault-info' ? frame.itemTitle : undefined),
+    );
+  }
+
   probeKey(): Promise<true> {
     return this.#once(
       (id) => ({ id, kind: 'probe-key' }),
