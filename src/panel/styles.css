@@ -67,14 +67,14 @@
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #eff1f5;
-    --surface: #ffffff;
+    --surface: #ccd0da;
     --surface-sunk: #dce0e8;
     --border: #bcc0cc;
     --text: #4c4f69;
     --text-muted: #6c6f85;
     --accent: #1e66f5;
     --accent-soft: rgb(30 102 245 / 10%);
-    --on-accent: #ffffff;
+    --on-accent: #eff1f5;
     --warn-bg: rgb(223 142 29 / 12%);
     --warn-border: rgb(223 142 29 / 35%);
     --error-bg: rgb(210 15 57 / 10%);
