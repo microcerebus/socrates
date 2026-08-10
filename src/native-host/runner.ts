@@ -26,11 +26,24 @@ export const CLAUDE_TIMEOUT_MS = 5 * 60_000;
 /** How long a cancelled child gets to exit on its own before SIGKILL. */
 export const KILL_GRACE_MS = 2_000;
 
+/**
+ * The floor between two `claude-thinking` pulses.
+ *
+ * The CLI emits a thinking delta every 25-300ms, which is far more often than a
+ * panel needs to know it is alive, and every pulse is a native-messaging frame
+ * plus a React render. 700ms is frequent enough that the panel's stall detector
+ * (25s of silence) can trust it, and rare enough to be free.
+ */
+export const THINKING_PULSE_MS = 700;
+
 export interface ClaudeRunDeps extends HostDeps {
   spawn: typeof nodeSpawn;
   /** Where the child runs. A directory with none of the user's config in it. */
   cwd: string;
   timeoutMs?: number;
+  /** Injected so the pulse throttle is testable without waiting on a clock. */
+  now?: () => number;
+  pulseMs?: number;
 }
 
 export type ClaudeStartRequest = Extract<HostRequest, { kind: 'claude-start' }>;
@@ -70,10 +83,31 @@ export function startClaudeRun(
   let rateLimit: RateLimitState | null = null;
   let result: { isError: boolean; message: string; apiErrorStatus: number | null; subtype: string } | null = null;
   let sawText = false;
-  let sawThinking = false;
+  let sawStarted = false;
   let cancelled = false;
   let stderr = '';
   let spawnErrorCode: string | undefined;
+
+  const now = deps.now ?? Date.now;
+  const pulseMs = deps.pulseMs ?? THINKING_PULSE_MS;
+  let lastPulseAt = Number.NEGATIVE_INFINITY;
+
+  /*
+   * "The run is still alive and has not produced any answer text yet."
+   *
+   * Any frame at all counts, including ones this host does not otherwise
+   * understand - a frame arriving is the truest evidence there is that the CLI
+   * has not wedged, and a future CLI adding frame types should make the panel
+   * feel more alive, not less. Once text starts flowing the panel has better
+   * evidence than a heartbeat, so the pulse stops.
+   */
+  const pulse = (): void => {
+    if (sawText) return;
+    const at = now();
+    if (at - lastPulseAt < pulseMs) return;
+    lastPulseAt = at;
+    emit({ ok: true, kind: 'claude-thinking', requestId });
+  };
 
   const timeoutMs = deps.timeoutMs ?? CLAUDE_TIMEOUT_MS;
   const timer = setTimeout(() => {
@@ -84,17 +118,23 @@ export function startClaudeRun(
 
   const consume = (line: string): void => {
     const event = parseClaudeLine(line);
-    if (event === null) return;
+    if (event === null) {
+      if (line.trim() !== '') pulse();
+      return;
+    }
     switch (event.kind) {
+      case 'started':
+        if (!sawStarted) {
+          sawStarted = true;
+          emit({ ok: true, kind: 'claude-started', requestId });
+        }
+        break;
       case 'text':
         sawText = true;
         emit({ ok: true, kind: 'claude-delta', requestId, text: event.text });
         break;
       case 'thinking':
-        if (!sawThinking) {
-          sawThinking = true;
-          emit({ ok: true, kind: 'claude-thinking', requestId });
-        }
+        pulse();
         break;
       case 'rate-limit':
         rateLimit = { status: event.status, resetsAt: event.resetsAt };

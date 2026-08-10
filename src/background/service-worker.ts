@@ -19,6 +19,7 @@ import { runInterviewTurn } from './interview.ts';
 import { getApiKey, getHostInfo, probeClaudeAccess } from './keychain.ts';
 import { apiKeyProvider, claudeCodeProvider, type ProviderStream } from './providers.ts';
 import { getAttempts, getSettings, recordAttempt, setSettings } from './session-store.ts';
+import { clearSession, getSession, saveSession } from './transcript-store.ts';
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
@@ -89,6 +90,7 @@ async function runAsk(
     stream: await providerFor(settings),
     request,
     signal,
+    onStarted: () => emit({ kind: 'started' }),
     onThinking: () => emit({ kind: 'thinking' }),
     onText: (text) => emit({ kind: 'delta', text }),
   });
@@ -158,6 +160,24 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'record-attempt':
         void recordAttempt(message.attempt)
           .then((attempts) => send({ kind: 'attempts', attempts }))
+          .catch(fail);
+        break;
+
+      case 'get-session':
+        void getSession(message.slug)
+          .then((session) => send({ kind: 'session', session }))
+          .catch(fail);
+        break;
+
+      case 'save-session':
+        void saveSession(message.session)
+          .then((session) => send({ kind: 'session', session }))
+          .catch(fail);
+        break;
+
+      case 'clear-session':
+        void clearSession(message.slug)
+          .then((session) => send({ kind: 'session', session }))
           .catch(fail);
         break;
 

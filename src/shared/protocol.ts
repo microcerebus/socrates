@@ -17,6 +17,7 @@ import type {
   ProviderId,
   Rung,
   Settings,
+  StoredSession,
   Turn,
 } from './types.ts';
 
@@ -44,6 +45,9 @@ export type PanelRequest =
   | { id: number; kind: 'set-settings'; settings: Settings }
   | { id: number; kind: 'get-attempts'; slug: string }
   | { id: number; kind: 'record-attempt'; attempt: AttemptRecord }
+  | { id: number; kind: 'get-session'; slug: string }
+  | { id: number; kind: 'save-session'; session: StoredSession }
+  | { id: number; kind: 'clear-session'; slug: string }
   | { id: number; kind: 'probe-key' }
   | { id: number; kind: 'probe-claude' }
   | { id: number; kind: 'host-info' };
@@ -51,10 +55,15 @@ export type PanelRequest =
 export type WorkerFrame =
   | { id: number; kind: 'capture-result'; snapshot: PageSnapshot | null; failure?: string }
   | { id: number; kind: 'delta'; text: string }
+  /** The turn is genuinely under way. Ends the panel's "connecting" phase. */
+  | { id: number; kind: 'started' }
+  /** A liveness heartbeat while the model thinks. Repeated, and text-free by design. */
   | { id: number; kind: 'thinking' }
   | { id: number; kind: 'done' }
   | { id: number; kind: 'settings'; settings: Settings }
   | { id: number; kind: 'attempts'; attempts: AttemptRecord[] }
+  /** `null` when there is nothing stored for that slug. */
+  | { id: number; kind: 'session'; session: StoredSession | null }
   | { id: number; kind: 'key-ok' }
   | { id: number; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
   | { id: number; kind: 'host-info'; itemTitle: string; claudePath: string | null }

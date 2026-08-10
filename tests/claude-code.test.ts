@@ -145,12 +145,25 @@ describe('the streaming port', () => {
     expect(port.disconnected).toBe(true);
   });
 
-  it('surfaces deltas in order and reports thinking once', async () => {
+  /*
+   * Every pulse has to get through. The panel's stall detector decides whether
+   * to tell the user something is wrong purely from the gap between events, so
+   * de-duplicating heartbeats here - which an earlier version did - would freeze
+   * it on the first one and make a healthy long think look like a hang.
+   */
+  it('surfaces deltas in order and forwards every thinking heartbeat', async () => {
     const port = new FakePort();
     const chunks: string[] = [];
+    let started = 0;
     let thinking = 0;
-    const running = stream(port, { onText: (text: string) => chunks.push(text), onThinking: () => (thinking += 1) });
+    const running = stream(port, {
+      onText: (text: string) => chunks.push(text),
+      onStarted: () => (started += 1),
+      onThinking: () => (thinking += 1),
+    });
 
+    port.emit({ ok: true, kind: 'claude-started', requestId: 'req-1' });
+    port.emit({ ok: true, kind: 'claude-thinking', requestId: 'req-1' });
     port.emit({ ok: true, kind: 'claude-thinking', requestId: 'req-1' });
     port.emit({ ok: true, kind: 'claude-thinking', requestId: 'req-1' });
     port.emit({ ok: true, kind: 'claude-delta', requestId: 'req-1', text: 'one ' });
@@ -159,7 +172,23 @@ describe('the streaming port', () => {
     await running;
 
     expect(chunks.join('')).toBe('one two');
-    expect(thinking).toBe(1);
+    expect(started).toBe(1);
+    expect(thinking).toBe(3);
+  });
+
+  it('drops liveness frames belonging to another request', async () => {
+    const port = new FakePort();
+    let started = 0;
+    let thinking = 0;
+    const running = stream(port, { onStarted: () => (started += 1), onThinking: () => (thinking += 1) });
+
+    port.emit({ ok: true, kind: 'claude-started', requestId: 'someone-else' });
+    port.emit({ ok: true, kind: 'claude-thinking', requestId: 'someone-else' });
+    port.emit({ ok: true, kind: 'claude-done', requestId: 'req-1' });
+    await running;
+
+    expect(started).toBe(0);
+    expect(thinking).toBe(0);
   });
 
   it('ignores frames belonging to another request', async () => {

@@ -137,6 +137,34 @@ export interface Turn {
   rung: Rung;
 }
 
+/**
+ * A practice session, saved per problem so returning to it does not start over.
+ *
+ * The point is usage, not convenience: on the Claude Code provider every turn is
+ * charged against the same Max window as the user's real work, so re-explaining
+ * a problem and re-earning three hints they already paid for is the single most
+ * wasteful thing the panel can do. This is what makes that avoidable.
+ *
+ * `startedAt` doubles as the key of the `AttemptRecord` in the session log, so a
+ * session resumed twice stays one attempt with one deepest rung rather than
+ * three attempts that each look shallower than the truth.
+ */
+export interface StoredSession {
+  slug: string;
+  title: string;
+  /** ISO-8601. The identity of the session, and the session log's upsert key. */
+  startedAt: string;
+  /** Epoch ms of the last write. Only used to decide what to prune first. */
+  updatedAt: number;
+  /** Wall-clock spent on the problem, carried across resumes. */
+  elapsedMs: number;
+  /** The rung that was unlocked when the panel closed. */
+  rung: Rung;
+  /** The deepest rung ever reached, which is what the session log reports. */
+  deepestRung: Rung;
+  turns: Turn[];
+}
+
 /** What the user asked for. Shapes the instruction appended to the conversation. */
 export type AskIntent = 'unlock' | 'chat' | 'review' | 'giveup';
 

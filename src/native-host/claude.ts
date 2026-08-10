@@ -32,6 +32,42 @@
  * `flattenMessages` in `src/background/interview.ts`) and sent on stdin, which
  * is one model call and keeps the host stateless.
  *
+ * ## What the frames actually look like, measured
+ *
+ * Timed against CLI 2.1.226 with exactly the flags below (see the PR that added
+ * this note). One turn, ~150 words out of Sonnet 5:
+ *
+ * ```
+ *  1650ms  system/init          <- the CLI has booted and is about to call the API
+ *  1917ms  content_block_start:thinking
+ *  ...     thinking_delta       <- every 25-300ms, occasionally a ~3s gap
+ *  2358ms  text_delta  126 chars
+ *  2987ms  text_delta  166 chars
+ *  ...                          <- ~150 chars every ~500ms, not per token
+ *  5559ms  result
+ * ```
+ *
+ * Two things follow, and both shape the events below.
+ *
+ * First, `--include-partial-messages` is doing its job: text really does arrive
+ * incrementally. What it does *not* do is arrive per token - the CLI coalesces
+ * deltas into ~150-character blocks. Rendering each block the moment it lands
+ * looks like paste, not typing, so the panel paces them out (`typewriter.ts`).
+ * That is a rendering choice over text that has genuinely arrived, not a fake.
+ *
+ * Second, the first ~1.7s is process startup with no frames at all, and thinking
+ * can run for a long time after that. So the host reports liveness rather than a
+ * single "it started thinking" edge: `started` when the init frame lands, and a
+ * throttled `thinking` pulse for as long as frames keep coming without text.
+ *
+ * ## Thinking text never leaves this process
+ *
+ * The `thinking` event deliberately carries no text, and nothing downstream can
+ * ask for it. Extended thinking drafts the *answer* - in a measured run at rung 1
+ * the thinking block contained a complete, word-counted draft of the reply. Piping
+ * that to the panel would be the worst spoiler leak in the product, and it would
+ * bypass the rung ladder entirely. Thinking is a heartbeat here and nothing else.
+ *
  * ## Run first, classify later
  *
  * Same rule as the `dcli` path in `handler.ts`. The happy path reads nothing but
@@ -89,7 +125,10 @@ export const CLAUDE_STATUS_COMMAND = 'claude auth status';
 export const ASSISTANT_RESULT_SUBTYPE = 'success';
 
 export type ClaudeEvent =
+  /** The CLI has booted and is about to call the API. Ends the "connecting" phase. */
+  | { kind: 'started' }
   | { kind: 'text'; text: string }
+  /** A liveness pulse while the model thinks. Carries no text, ever - see the header. */
   | { kind: 'thinking' }
   | { kind: 'rate-limit'; status: string; resetsAt: number | null }
   | {
@@ -120,6 +159,10 @@ interface StreamFrame {
  * de-duplication: when the CLI cannot reach the API it synthesises an `assistant`
  * message carrying the error prose, and reading those would print "Not logged in
  * · Please run /login" into the panel as though the interviewer had said it.
+ *
+ * A `thinking_delta` maps to the same empty `thinking` event as the block start,
+ * because what the caller needs from it is "still alive", not its content. The
+ * content is a draft of the answer and must not leave this process.
  */
 export function parseClaudeLine(line: string): ClaudeEvent | null {
   const trimmed = line.trim();
@@ -137,11 +180,20 @@ export function parseClaudeLine(line: string): ClaudeEvent | null {
     if (event?.type === 'content_block_start' && event.content_block?.type === 'thinking') {
       return { kind: 'thinking' };
     }
+    if (event?.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') {
+      return { kind: 'thinking' };
+    }
     if (event?.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
       const text = event.delta.text;
       if (typeof text === 'string' && text !== '') return { kind: 'text', text };
     }
     return null;
+  }
+
+  // The init frame is the CLI saying it is up and about to call the API. It is
+  // the only `system` subtype that means anything to an interview.
+  if (frame.type === 'system') {
+    return frame.subtype === 'init' ? { kind: 'started' } : null;
   }
 
   if (frame.type === 'rate_limit_event') {

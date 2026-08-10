@@ -1,7 +1,36 @@
 /*
  * The panel sits next to a problem the user is staring at while thinking.
- * It should read like a quiet notebook: one column, one accent, generous
- * line-height, nothing that moves unless the model is talking.
+ * It should read like a quiet notebook: one column, generous line-height, and
+ * nothing that moves unless something is genuinely happening.
+ *
+ * ## Colour carries one idea: how much help you are spending
+ *
+ * Each rung has a hue, running cool to warm as the assistance escalates - sky,
+ * blue, mauve for the rungs that only ask you questions, then yellow, peach and
+ * red once the panel starts handing you the answer. The temperature is the
+ * message: you should be able to glance at the footer and know you have moved
+ * from being nudged to being told, without reading a word.
+ *
+ * The mapping lives in the `--rung-0` … `--rung-5` tokens and is selected purely
+ * by a `data-rung` attribute, so the meter, the message badges, the hint counter
+ * and the unlock button cannot drift apart. Setting `data-rung` on any element
+ * re-points `--rung` for its whole subtree.
+ *
+ * ## Where a rung colour may and may not appear
+ *
+ * As a bar, a border, a dot or a soft tint - never as body text, and never as a
+ * solid fill under text in the light scheme. Catppuccin Latte's warm accents sit
+ * around 2.4:1 against Base, so rung-coloured prose would fail AA at exactly the
+ * rungs that matter most. A filled control (`button.primary`) is therefore the
+ * hue itself in Mocha, where dark `--rung-ink` over a pastel clears 8:1, and a
+ * 16% wash of it in Latte. That is the one place the two schemes differ
+ * structurally, and it is why they can both keep the full six-hue ramp.
+ *
+ * One mechanical trap, learned the hard way: a custom property that references
+ * another one resolves in the scope it is *declared* in, not where it is used.
+ * `--rung-solid: var(--rung)` on `:root` computes against a `--rung` that does
+ * not exist there and inherits that nothing everywhere. So every rung-dependent
+ * rule below reads `var(--rung)` directly in the property that consumes it.
  */
 
 /*
@@ -50,8 +79,6 @@
   --text-muted: #a6adc8;
   --accent: #89b4fa;
   --accent-soft: rgb(137 180 250 / 16%);
-  /* Text drawn on top of a filled --accent surface. */
-  --on-accent: #1e1e2e;
   --warn-bg: rgb(249 226 175 / 14%);
   --warn-border: rgb(249 226 175 / 40%);
   --error-bg: rgb(243 139 168 / 14%);
@@ -60,7 +87,47 @@
   --medium: #f9e2af;
   --hard: #f38ba8;
   --radius: 8px;
+
+  /* The ladder, cool to warm: Sky, Blue, Mauve, Yellow, Peach, Red. */
+  --rung-0: #89dceb;
+  --rung-1: #89b4fa;
+  --rung-2: #cba6f7;
+  --rung-3: #f9e2af;
+  --rung-4: #fab387;
+  --rung-5: #f38ba8;
+
+  /*
+   * The ink for a filled rung control. Mocha's rung hues are pastels, so the
+   * fill can be the colour itself with Crust on top - the worst pair in the ramp
+   * still clears 8:1.
+   */
+  --rung-ink: #11111b;
+
   color-scheme: dark light;
+}
+
+/*
+ * `data-rung` is the only selector that maps a rung to a hue. Everything else
+ * reads `--rung`, so a message bubble, the meter and the unlock button agree by
+ * construction rather than by three lists being kept in step.
+ */
+[data-rung='0'] {
+  --rung: var(--rung-0);
+}
+[data-rung='1'] {
+  --rung: var(--rung-1);
+}
+[data-rung='2'] {
+  --rung: var(--rung-2);
+}
+[data-rung='3'] {
+  --rung: var(--rung-3);
+}
+[data-rung='4'] {
+  --rung: var(--rung-4);
+}
+[data-rung='5'] {
+  --rung: var(--rung-5);
 }
 
 /* Catppuccin Latte, the light counterpart with the same semantic mapping. */
@@ -74,7 +141,6 @@
     --text-muted: #6c6f85;
     --accent: #1e66f5;
     --accent-soft: rgb(30 102 245 / 10%);
-    --on-accent: #eff1f5;
     --warn-bg: rgb(223 142 29 / 12%);
     --warn-border: rgb(223 142 29 / 35%);
     --error-bg: rgb(210 15 57 / 10%);
@@ -82,6 +148,24 @@
     --easy: #40a02b;
     --medium: #df8e1d;
     --hard: #d20f39;
+
+    /* The same six hues in Latte. Same order, same meaning. */
+    --rung-0: #04a5e5;
+    --rung-1: #1e66f5;
+    --rung-2: #8839ef;
+    --rung-3: #df8e1d;
+    --rung-4: #fe640b;
+    --rung-5: #d20f39;
+
+    /*
+     * Latte's accents are saturated mid-tones: filling a button with Yellow or
+     * Sky and writing on it lands around 2.4:1 whichever ink you pick. So a
+     * "filled" control here is a wash of the hue over the surface instead (see
+     * `button.primary`), which keeps the hue unmistakable and the label above
+     * 4.5:1, and the ink is the ordinary text colour rather than a light one.
+     */
+    --rung-ink: var(--text);
+
     color-scheme: light dark;
   }
 }
@@ -168,6 +252,38 @@ body {
   color: var(--hard);
 }
 
+/*
+ * The rung badge and the hint counter, both tinted. The hue is the background
+ * and the border; the words stay `--text`, which is what keeps the warm rungs
+ * legible in Latte.
+ */
+.rung-pill {
+  border-color: var(--rung);
+  background: color-mix(in srgb, var(--rung) 18%, transparent);
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hint-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hint-count::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rung);
+}
+
+.hint-count strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
 .past {
   margin: 6px 0 0;
   font-size: 11.5px;
@@ -176,13 +292,47 @@ body {
 
 /* ---------- transcript ---------- */
 
+/*
+ * The wrapper owns the leftover height and the "jump to latest" affordance; the
+ * inner element does the scrolling. `min-height: 0` is what lets a flex item
+ * shrink below its content instead of pushing the column open.
+ */
+.transcript-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .transcript {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 14px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/*
+ * Only visible once you have scrolled up, which is the only time it means
+ * anything. It is the counterpart to the panel giving up its auto-scroll: you
+ * take control by scrolling, and you get it back by asking.
+ */
+.jump-latest {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-size: 11.5px;
+  border-radius: 999px;
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 28%);
+  animation: rise-in 160ms ease-out;
 }
 
 .empty {
@@ -199,8 +349,17 @@ body {
   font-size: 12.5px;
 }
 
+/* The empty state is the ladder's first appearance, so it is colour-coded too. */
+.ladder-preview {
+  list-style: none;
+  padding-left: 0;
+}
+
 .ladder-preview li {
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  padding-left: 10px;
+  border-left: 3px solid var(--rung);
+  border-radius: 2px;
 }
 
 .ladder-preview strong {
@@ -211,6 +370,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .turn-user .body {
@@ -219,6 +379,10 @@ body {
   padding: 8px 11px;
   align-self: flex-end;
   max-width: 92%;
+  min-width: 0;
+  /* A pasted stack trace or a 200-character identifier must wrap, not widen the
+   * column and give the whole panel a horizontal scrollbar. */
+  overflow-wrap: anywhere;
 }
 
 .turn-user .body p {
@@ -226,11 +390,31 @@ body {
   white-space: pre-wrap;
 }
 
+/*
+ * An interviewer message wears the rung it was delivered at: a spine down the
+ * left in the rung hue, a wash of it behind the text, and a badge naming it.
+ * Scrolling back through a session then reads as a colour gradient from cool to
+ * warm - the history of what you spent, without a single number.
+ */
+.turn-assistant .body {
+  min-width: 0;
+  padding: 9px 12px 9px 11px;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--rung);
+  background: color-mix(in srgb, var(--rung) 7%, transparent);
+  overflow-wrap: anywhere;
+}
+
 .rung-tag {
+  align-self: flex-start;
   font-size: 10.5px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text);
+  background: color-mix(in srgb, var(--rung) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--rung) 55%, transparent);
+  border-radius: 999px;
+  padding: 0 8px;
 }
 
 .turn-assistant .body > :first-child {
@@ -260,7 +444,7 @@ body {
 /* Caret on the last block so it sits at the end of the sentence, not below it. */
 .streaming .body > :last-child::after {
   content: '▍';
-  color: var(--text-muted);
+  color: var(--rung);
   margin-left: 1px;
   animation: blink 1.1s steps(2, start) infinite;
 }
@@ -271,10 +455,83 @@ body {
   }
 }
 
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+/* ---------- the turn in flight ---------- */
+
+/*
+ * Three separate claims, each carried by its own element: the glyph says alive,
+ * the counter says how long, the label says what. The old single italic
+ * "thinking…" made all three at once and was wrong about two of them.
+ */
 .thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--rung) 40%, transparent);
+  background: color-mix(in srgb, var(--rung) 8%, transparent);
   color: var(--text-muted);
-  font-style: italic;
-  margin: 0;
+  font-size: 12.5px;
+}
+
+.thinking-glyph {
+  color: var(--rung);
+  font-size: 13px;
+  line-height: 1;
+  animation: pulse-glyph 1.6s ease-in-out infinite;
+}
+
+.thinking-label {
+  color: var(--text);
+}
+
+.thinking-elapsed {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.thinking-stop {
+  font-size: 11.5px;
+}
+
+/*
+ * A run that has gone quiet says so by changing colour as well as wording, and
+ * slows its own animation down rather than stopping - a frozen spinner is the
+ * exact ambiguity this whole component exists to remove.
+ */
+.thinking[data-liveness='stalled'] {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.thinking[data-liveness='stalled'] .thinking-glyph {
+  color: var(--medium);
+  animation-duration: 3.2s;
+}
+
+.thinking[data-liveness='timed-out'] {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
+@keyframes pulse-glyph {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.86) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12) rotate(180deg);
+  }
 }
 
 code {
@@ -316,6 +573,58 @@ pre code {
   margin-bottom: 6px;
 }
 
+/* ---------- the ladder as a picture ---------- */
+
+/*
+ * Six bars, one per rung. Spent rungs are filled with their hue, the current one
+ * is filled and lifted, the next one is outlined in the hue it would cost you,
+ * and locked rungs are flat. The widths are equal because the rungs are steps,
+ * not a progress bar - you are not 60% of the way to anything.
+ */
+.rung-meter {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 0 0 9px;
+  padding: 0;
+}
+
+.rung-meter li {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--surface-sunk);
+  transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.rung-meter li[data-state='spent'] {
+  background: color-mix(in srgb, var(--rung) 62%, transparent);
+  border-color: var(--rung);
+}
+
+.rung-meter li[data-state='current'] {
+  background: var(--rung);
+  border-color: var(--rung);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rung) 26%, transparent);
+}
+
+.rung-meter li[data-state='next'] {
+  background: none;
+  border-color: color-mix(in srgb, var(--rung) 70%, transparent);
+  border-style: dashed;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 button {
   font: inherit;
   font-size: 13px;
@@ -337,22 +646,49 @@ button:disabled {
   cursor: default;
 }
 
+/*
+ * The unlock button is painted in the rung it would *unlock*, not the one you
+ * are on, so the cost of the next click is visible before it is read.
+ *
+ * `var(--rung)` is read here, at the point of use, rather than through an alias
+ * token. A custom property that references another one resolves in the scope it
+ * is *declared* in, so a `--rung-solid: var(--rung)` on `:root` would compute
+ * against the `--rung` that does not exist there and inherit that nothing all
+ * the way down. Everything rung-coloured in this file reads `--rung` directly.
+ */
 button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
+  background: var(--rung);
+  border-color: var(--rung);
+  color: var(--rung-ink);
   flex: 1;
-  font-weight: 550;
+  font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
   filter: brightness(1.08);
 }
 
+button[data-rung]:not(.primary):hover:not(:disabled) {
+  border-color: var(--rung);
+}
+
 button.ghost {
   background: none;
   color: var(--text-muted);
   flex: 1;
+}
+
+/*
+ * "I give up" is permanently rung 5, so it always carries the red edge. It is
+ * the one control whose cost does not depend on where you are.
+ */
+button.give-up {
+  border-color: color-mix(in srgb, var(--rung) 45%, var(--border));
+}
+
+button.give-up:hover:not(:disabled) {
+  border-color: var(--rung);
+  color: var(--text);
 }
 
 button.link {
@@ -378,6 +714,22 @@ button.link {
   color: var(--text-muted);
 }
 
+/* A swatch rather than coloured text, so the name stays at full contrast. */
+.rung-name {
+  color: var(--text);
+}
+
+.rung-name::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 2px;
+  background: var(--rung);
+  vertical-align: baseline;
+}
+
 .composer {
   display: flex;
   gap: 8px;
@@ -400,8 +752,15 @@ input:not([type]) {
 
 textarea:focus,
 input:focus {
-  outline: 2px solid var(--accent-soft);
-  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--rung) 35%, transparent);
+  border-color: var(--rung);
+}
+
+/* One visible focus ring for every control, in the rung's own colour. */
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--rung);
+  outline-offset: 2px;
 }
 
 .footnote {
@@ -524,4 +883,103 @@ input:focus {
 .field > span {
   font-size: 11.5px;
   color: var(--text-muted);
+}
+
+/* See the `--rung-ink` note in the Latte palette block for why the fill differs. */
+@media (prefers-color-scheme: light) {
+  button.primary {
+    background: color-mix(in srgb, var(--rung) 16%, var(--surface));
+  }
+}
+
+/* ---------- resuming ---------- */
+
+/*
+ * Tinted at the rung the stored session reached, so the offer already tells you
+ * how much is waiting there before you read the numbers.
+ */
+.resume {
+  margin: 10px 14px 0;
+  padding: 11px 13px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--rung) 45%, transparent);
+  border-left: 3px solid var(--rung);
+  background: color-mix(in srgb, var(--rung) 9%, var(--surface));
+  animation: fade-in 180ms ease-out;
+}
+
+.resume h2 {
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+
+.resume p {
+  margin: 0 0 7px;
+}
+
+/*
+ * "Start fresh" takes only the room its label needs, so the recommended choice
+ * keeps its full sentence on one line at a narrow panel width instead of
+ * wrapping into a two-line block.
+ */
+.resume .ladder-row {
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.resume .ghost {
+  flex: 0 0 auto;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.notice {
+  animation: fade-in 180ms ease-out;
+}
+
+/* ---------- motion ---------- */
+
+/*
+ * Every animation in this file is evidence of something - the glyph means the
+ * run is alive, the caret means text is still coming, the fades mean something
+ * appeared. With reduced motion the evidence has to come from somewhere that is
+ * not movement, which is why the glyph keeps its opacity pulse (slow, no
+ * transform) rather than going completely still: a motionless indicator is the
+ * ambiguity this design set out to remove. The paced reveal is switched off in
+ * `App.tsx`, where the pacer is simply given a zero-length window.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .resume,
+  .notice,
+  .jump-latest {
+    animation: none;
+  }
+
+  .streaming .body > :last-child::after {
+    animation: none;
+  }
+
+  .thinking-glyph {
+    animation: fade-pulse 2.4s ease-in-out infinite;
+  }
+
+  .rung-meter li,
+  button {
+    transition: none;
+  }
+
+  @keyframes fade-pulse {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
 }

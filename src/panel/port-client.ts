@@ -11,7 +11,14 @@ import {
   type PanelRequest,
   type WorkerFrame,
 } from '../shared/protocol.ts';
-import { appError, type AppError, type AttemptRecord, type PageSnapshot, type Settings } from '../shared/types.ts';
+import {
+  appError,
+  type AppError,
+  type AttemptRecord,
+  type PageSnapshot,
+  type Settings,
+  type StoredSession,
+} from '../shared/types.ts';
 
 type FrameHandler = (frame: WorkerFrame) => void;
 
@@ -29,6 +36,9 @@ export interface ClaudeAccess {
 
 export interface AskCallbacks {
   onDelta(text: string): void;
+  /** The turn is genuinely under way. Fires once. */
+  onStarted(): void;
+  /** A liveness heartbeat while the model thinks. Fires repeatedly. */
   onThinking(): void;
   onDone(): void;
   onError(error: AppError): void;
@@ -108,6 +118,28 @@ export class PortClient {
     );
   }
 
+  getSession(slug: string): Promise<StoredSession | null> {
+    return this.#once(
+      (id) => ({ id, kind: 'get-session', slug }),
+      // `session` is legitimately null, so `undefined` alone means "not my frame".
+      (frame) => (frame.kind === 'session' ? { value: frame.session } : undefined),
+    ).then((wrapper) => wrapper.value);
+  }
+
+  saveSession(session: StoredSession): Promise<StoredSession | null> {
+    return this.#once(
+      (id) => ({ id, kind: 'save-session', session }),
+      (frame) => (frame.kind === 'session' ? { value: frame.session } : undefined),
+    ).then((wrapper) => wrapper.value);
+  }
+
+  clearSession(slug: string): Promise<void> {
+    return this.#once(
+      (id) => ({ id, kind: 'clear-session', slug }),
+      (frame) => (frame.kind === 'session' ? true : undefined),
+    ).then(() => undefined);
+  }
+
   hostInfo(): Promise<HostInfo> {
     return this.#once(
       (id) => ({ id, kind: 'host-info' }),
@@ -139,6 +171,9 @@ export class PortClient {
       switch (frame.kind) {
         case 'delta':
           callbacks.onDelta(frame.text);
+          break;
+        case 'started':
+          callbacks.onStarted();
           break;
         case 'thinking':
           callbacks.onThinking();

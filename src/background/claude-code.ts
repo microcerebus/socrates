@@ -42,6 +42,9 @@ export interface ClaudeCodeStreamOptions {
   /** The whole transcript, already flattened into one turn. */
   prompt: string;
   onText(text: string): void;
+  /** Once, when the CLI is up and about to call the API. */
+  onStarted?(): void;
+  /** Repeated while the model thinks. A heartbeat, not a one-shot edge. */
   onThinking?(): void;
   signal?: AbortSignal;
   /** Injected in tests. */
@@ -63,7 +66,6 @@ export async function streamClaudeCode(options: ClaudeCodeStreamOptions): Promis
 
   return new Promise<void>((resolve, reject) => {
     let settled = false;
-    let sawThinking = false;
 
     const finish = (outcome: () => void): void => {
       if (settled) return;
@@ -108,11 +110,13 @@ export async function streamClaudeCode(options: ClaudeCodeStreamOptions): Promis
         case 'claude-delta':
           if (message.requestId === requestId) options.onText(message.text);
           break;
+        case 'claude-started':
+          if (message.requestId === requestId) options.onStarted?.();
+          break;
+        // Deliberately not de-duplicated: every pulse is the evidence the panel's
+        // stall detector runs on, so swallowing the repeats would freeze it.
         case 'claude-thinking':
-          if (message.requestId === requestId && !sawThinking) {
-            sawThinking = true;
-            options.onThinking?.();
-          }
+          if (message.requestId === requestId) options.onThinking?.();
           break;
         case 'claude-done':
           if (message.requestId === requestId) finish(resolve);

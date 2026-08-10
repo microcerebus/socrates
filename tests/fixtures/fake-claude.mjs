@@ -24,6 +24,10 @@ if (pidFile) writeFileSync(pidFile, String(process.pid), 'utf8');
 const say = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 const delta = (text) => say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
 const thinking = () => say({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } });
+// A thinking delta carries text in the real CLI. It is dropped here deliberately:
+// nothing downstream is allowed to read it, so nothing needs to see it.
+const thinkingDelta = () => say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'drafting the answer' } } });
+const init = () => say({ type: 'system', subtype: 'init', cwd: '/tmp', tools: [], model, claude_code_version: '2.1.226' });
 const result = ({ subtype = 'success', ...extra } = {}) => say({ type: 'result', subtype, num_turns: 1, ...extra });
 
 function readStdin() {
@@ -41,6 +45,7 @@ const prompt = await readStdin();
 
 switch (model) {
   case 'scenario-reply': {
+    init();
     thinking();
     // Deliberately split across frames, the way real token deltas arrive.
     for (const piece of ['What ', 'do you ', 'already know', ' about the input?']) delta(piece);
@@ -99,6 +104,17 @@ switch (model) {
     // Terminates without is_error, but the subtype says `result` holds a CLI
     // diagnostic rather than anything the model said. Nothing to show.
     result({ subtype: 'error_max_turns', is_error: false, result: 'Reached maximum number of turns.' });
+    break;
+  }
+
+  case 'scenario-long-think': {
+    // The shape of a real slow turn: the CLI comes up, thinks for a while
+    // producing nothing but thinking deltas, and only then starts answering.
+    init();
+    thinking();
+    for (let i = 0; i < 40; i += 1) thinkingDelta();
+    delta('Finally, an answer.');
+    result({ is_error: false, result: 'Finally, an answer.' });
     break;
   }
 
