@@ -489,6 +489,56 @@ describe('saving a settings change', () => {
     expect(worker.errors[0]?.message).toBe('storage is full');
   });
 
+  it('lets a change made before the stored value arrived stand, and still confirms it', async () => {
+    const worker = fakeWorker();
+
+    // The panel asks for settings on mount and the sheet is one click away, so
+    // the user can change something before the load answers.
+    worker.writer.patch({ provider: 'api-key' });
+    expect(worker.displayed?.provider).toBe('api-key');
+
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+
+    // The load must not revert what the user just chose.
+    expect(worker.displayed?.provider).toBe('api-key');
+
+    await worker.settle();
+    worker.pending[0]?.resolve();
+    await worker.settle();
+
+    // Nor may it orphan the write: the reply is still applied, so the panel and
+    // storage agree without waiting for a reload.
+    expect(worker.displayed?.provider).toBe('api-key');
+    expect(worker.stored.provider).toBe('api-key');
+    expect(worker.writer.current.provider).toBe('api-key');
+  });
+
+  it('takes the stored value when the load arrives with nothing in flight', async () => {
+    const worker = fakeWorker();
+    worker.writer.adopt({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+  });
+
+  it('rolls a later failure back to the stored value, not to the defaults', async () => {
+    const worker = fakeWorker();
+
+    // Patch first, so `adopt` runs while a write is in flight and only updates
+    // the baseline. That baseline is what a failure must fall back to.
+    worker.writer.patch({ provider: 'api-key' });
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-opus-5' });
+    await worker.settle();
+    worker.pending[0]?.resolve();
+    await worker.settle();
+
+    worker.writer.patch({ model: 'claude-haiku-4-5-20251001' });
+    await worker.settle();
+    worker.pending[1]?.reject(appError('api-error', 'storage is full'));
+    await worker.settle();
+
+    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-sonnet-5' });
+    expect(worker.errors).toHaveLength(1);
+  });
+
   it('does not undo anything when a newer change is already on its way', async () => {
     const worker = fakeWorker();
     worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });

@@ -17,7 +17,9 @@
  * - writes are **serialised** through one promise chain, so the worker sees them
  *   in the order they were made and the last one is what lands in storage;
  * - a reply is **adopted only if it is still the newest** intent, so a slow
- *   earlier round trip cannot resurrect the value it was carrying.
+ *   earlier round trip cannot resurrect the value it was carrying - and for the
+ *   same reason the initial load defers to a change already in flight rather
+ *   than overwriting it.
  *
  * It is deliberately free of React: this is the part worth testing, and a
  * promise-ordering test should not need a renderer.
@@ -55,10 +57,23 @@ export function createSettingsWriter(options: SettingsWriterOptions): SettingsWr
       return current;
     },
 
+    /**
+     * The load is a read, not a change, and it can land *after* the user has
+     * already touched a radio - the panel asks for settings on mount and the
+     * sheet is one click away. So it always updates the baseline a failed write
+     * falls back to, but it only takes over the display when nothing is in
+     * flight. Clobbering `newest` here would revert the user's choice on screen
+     * *and* orphan its reply, leaving the panel disagreeing with storage until
+     * the next reload.
+     *
+     * A change made before the stored value was known is still built on the
+     * defaults for the fields it did not name; that is inherent to acting before
+     * the answer arrives, and the window is a few milliseconds wide.
+     */
     adopt(settings: Settings): void {
-      current = settings;
       confirmed = settings;
-      newest = null;
+      if (newest !== null) return;
+      current = settings;
       options.onSettings(settings);
     },
 
