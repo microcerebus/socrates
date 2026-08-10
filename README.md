@@ -202,7 +202,7 @@ Changing provider and model back to back is safe: each change is a patch against
 
 The same three ids work on both providers: the CLI accepts full model ids, so the picker maps straight through.
 On the API-key provider, requests use adaptive thinking at medium effort on the Claude 5 models; Haiku 4.5 predates both parameters and rejects them, so they are omitted for it (`src/background/anthropic.ts`).
-Replies stream token by token on both providers, and the panel says it is thinking rather than sitting blank until the first token lands.
+Replies stream on both providers, and the panel shows what is actually happening while they do: see below.
 
 The access section below the pickers follows the selected provider.
 **Test Claude Code access** reports the resolved binary and which account the CLI is logged in as; **Test vault access** runs the key fetch on its own and names the Dashlane item the host is configured to read.
@@ -214,6 +214,21 @@ Dark is the primary scheme, because LeetCode practice usually happens in dark mo
 The panel follows `prefers-color-scheme` with no toggle.
 Every colour in `src/panel/styles.css` comes from a token defined in one of the two palette blocks, and every foreground/background pair in use clears WCAG AA in both schemes.
 Both schemes were checked visually before shipping, including chat bubbles, ladder states, disabled buttons, error and remedy panels, and code blocks.
+
+### The rungs have colours
+
+Each rung owns a hue, running cool to warm as the assistance escalates.
+
+| Rung | 0 Understand | 1 Pattern smell | 2 Name the technique | 3 Approach outline | 4 Pseudocode | 5 Full walkthrough |
+| --- | --- | --- | --- | --- | --- | --- |
+| Hue | Sky | Blue | Mauve | Yellow | Peach | Red |
+
+The temperature is the message: you should be able to glance at the footer and know you have moved from being nudged to being told, without reading a word.
+The same hue carries the ladder meter, the badge and spine on every interviewer message, the rung pill and hint counter in the header, and the unlock button - which wears the colour of the rung it *would* unlock, so the cost of the next click is visible before it is read.
+
+Rung colour is never used for prose or for a button label.
+Catppuccin Latte's warm accents sit around 2.4:1 against Base, so rung colour is confined to bars, borders, dots and washes, and a filled control uses the hue itself in Mocha but a wash of it in Latte.
+Motion follows the same rule as colour - it only ever means something - and `prefers-reduced-motion: reduce` drops the paced reveal and every transform.
 
 ## How the API key is handled
 
@@ -236,10 +251,37 @@ It applies to the API-key provider; on Claude Code there is no key involved at a
 Calls to `api.anthropic.com` go out from the service worker with the `anthropic-dangerous-direct-browser-access` header, which the API requires for browser-origin requests.
 That header is safe here in a way it is not on a web page: the key never touches disk and never enters a renderer process.
 
+## A turn in flight
+
+The panel distinguishes four states and will not claim more than the events it has received support (`src/panel/turn-progress.ts`).
+
+| State | What it means |
+| --- | --- |
+| `connecting…` | The request has gone out and not one frame has come back. On Claude Code this is the CLI starting up. |
+| `thinking…` | The transport says the turn is under way; no answer text yet. Heartbeats are still arriving. |
+| `writing…` | Text is arriving. |
+| `still working - long think` | Nothing at all for 25 seconds. The run has not failed, and the panel does not pretend otherwise - it says what it knows. |
+
+An animated glyph and a counting-up elapsed time run alongside the label, and Stop is in the indicator itself as well as the composer.
+A hard timeout at six minutes turns an unanswered turn into an actionable error rather than a spinner that never stops; it sits deliberately past the host's own five-minute cap, so the host - which has stderr, the exit code and `claude auth status` - gets to write the message whenever it still can.
+
+## Picking a problem back up
+
+Closing the panel does not throw the session away.
+Each problem's transcript, rung, hints and elapsed time are saved in `chrome.storage.local` under its slug, and returning to the problem offers **Resume where you left off** or **Start fresh**.
+
+This is about the usage window rather than convenience.
+On the Claude Code provider every turn draws on the same Max pool as your real work, so re-explaining a problem and re-earning three hints you already paid for is the most wasteful thing the panel could do.
+Resuming restores the conversation *and* the rung, so nothing is bought twice.
+
+Storage is bounded on four axes - characters per turn, turns per session, characters per session, and number of sessions - and the oldest are pruned first (`src/background/transcript-store.ts`).
+The page snapshot is deliberately not saved: it is re-scraped on resume, because a stale editor buffer would make "check my code" worse than useless.
+
 ## Session log
 
 Every attempt is recorded in `chrome.storage.local` as date, time spent, deepest rung reached, and hints used, keyed by problem slug.
 The record is upserted as you climb, so it stays current without needing to catch the moment the panel closes.
+A resumed session keeps the attempt id it started with, so one problem-sitting stays one row with one deepest rung rather than splitting into several shallower-looking attempts.
 Past attempts at the current problem appear under the header.
 There is no dashboard in v1.
 
@@ -265,6 +307,8 @@ The native host is a sixth artefact built for Node.
 | `tests/native-host.test.ts` | Native messaging framing, config parsing, status parsing, and every vault failure branch against a fake `dcli` |
 | `tests/claude-host.test.ts` | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
 | `tests/claude-code.test.ts` | The extension half: the streaming port, cancellation, error mapping, transcript flattening, race-safe settings writes, and that both providers redact identically |
+| `tests/streaming-ux.test.ts` | The CLI frames a turn in flight is read from, the host's liveness heartbeat against a real child process, the phase machine and stall detector, and the reveal pacer |
+| `tests/session-resume.test.ts` | Saving and restoring a session with its rung, surviving junk already on disk, and every storage bound |
 | `tests/dcli-contract.test.ts` | That the real `dcli status` still emits the lines the classifier reads. Skipped when `dcli` is not installed |
 | `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed |
 

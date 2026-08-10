@@ -21,10 +21,16 @@
  * As a bar, a border, a dot or a soft tint - never as body text, and never as a
  * solid fill under text in the light scheme. Catppuccin Latte's warm accents sit
  * around 2.4:1 against Base, so rung-coloured prose would fail AA at exactly the
- * rungs that matter most. `--rung-solid` therefore resolves to the colour itself
- * in Mocha (where dark ink over a pastel clears 8:1) and to a tint of it in
- * Latte, with `--rung-ink` following. That is the one place the two schemes
- * differ structurally, and it is why they can both keep the full six-hue ramp.
+ * rungs that matter most. A filled control (`button.primary`) is therefore the
+ * hue itself in Mocha, where dark `--rung-ink` over a pastel clears 8:1, and a
+ * 16% wash of it in Latte. That is the one place the two schemes differ
+ * structurally, and it is why they can both keep the full six-hue ramp.
+ *
+ * One mechanical trap, learned the hard way: a custom property that references
+ * another one resolves in the scope it is *declared* in, not where it is used.
+ * `--rung-solid: var(--rung)` on `:root` computes against a `--rung` that does
+ * not exist there and inherits that nothing everywhere. So every rung-dependent
+ * rule below reads `var(--rung)` directly in the property that consumes it.
  */
 
 /*
@@ -73,8 +79,6 @@
   --text-muted: #a6adc8;
   --accent: #89b4fa;
   --accent-soft: rgb(137 180 250 / 16%);
-  /* Text drawn on top of a filled --accent surface. */
-  --on-accent: #1e1e2e;
   --warn-bg: rgb(249 226 175 / 14%);
   --warn-border: rgb(249 226 175 / 40%);
   --error-bg: rgb(243 139 168 / 14%);
@@ -93,10 +97,10 @@
   --rung-5: #f38ba8;
 
   /*
-   * Mocha's rung hues are pastels, so a filled control can be the colour itself
-   * with Crust on top - the worst pair in the ramp still clears 8:1.
+   * The ink for a filled rung control. Mocha's rung hues are pastels, so the
+   * fill can be the colour itself with Crust on top - the worst pair in the ramp
+   * still clears 8:1.
    */
-  --rung-solid: var(--rung);
   --rung-ink: #11111b;
 
   color-scheme: dark light;
@@ -137,7 +141,6 @@
     --text-muted: #6c6f85;
     --accent: #1e66f5;
     --accent-soft: rgb(30 102 245 / 10%);
-    --on-accent: #eff1f5;
     --warn-bg: rgb(223 142 29 / 12%);
     --warn-border: rgb(223 142 29 / 35%);
     --error-bg: rgb(210 15 57 / 10%);
@@ -157,10 +160,10 @@
     /*
      * Latte's accents are saturated mid-tones: filling a button with Yellow or
      * Sky and writing on it lands around 2.4:1 whichever ink you pick. So a
-     * "filled" control here is a 16% wash of the hue over the surface, which
-     * keeps the hue unmistakable and the label above 4.5:1.
+     * "filled" control here is a wash of the hue over the surface instead (see
+     * `button.primary`), which keeps the hue unmistakable and the label above
+     * 4.5:1, and the ink is the ordinary text colour rather than a light one.
      */
-    --rung-solid: color-mix(in srgb, var(--rung) 16%, var(--surface));
     --rung-ink: var(--text);
 
     color-scheme: light dark;
@@ -645,21 +648,24 @@ button:disabled {
 
 /*
  * The unlock button is painted in the rung it would *unlock*, not the one you
- * are on, so the cost of the next click is visible before it is read. See the
- * `--rung-solid` note at the top for why "filled" means two different things in
- * the two schemes.
+ * are on, so the cost of the next click is visible before it is read.
+ *
+ * `var(--rung)` is read here, at the point of use, rather than through an alias
+ * token. A custom property that references another one resolves in the scope it
+ * is *declared* in, so a `--rung-solid: var(--rung)` on `:root` would compute
+ * against the `--rung` that does not exist there and inherit that nothing all
+ * the way down. Everything rung-coloured in this file reads `--rung` directly.
  */
 button.primary {
-  background: var(--rung-solid, var(--accent));
-  border-color: var(--rung, var(--accent));
-  color: var(--rung-ink, var(--on-accent));
+  background: var(--rung);
+  border-color: var(--rung);
+  color: var(--rung-ink);
   flex: 1;
   font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
   filter: brightness(1.08);
-  border-color: var(--rung, var(--accent));
 }
 
 button[data-rung]:not(.primary):hover:not(:disabled) {
@@ -879,6 +885,13 @@ input:focus-visible {
   color: var(--text-muted);
 }
 
+/* See the `--rung-ink` note in the Latte palette block for why the fill differs. */
+@media (prefers-color-scheme: light) {
+  button.primary {
+    background: color-mix(in srgb, var(--rung) 16%, var(--surface));
+  }
+}
+
 /* ---------- resuming ---------- */
 
 /*
@@ -904,8 +917,18 @@ input:focus-visible {
   margin: 0 0 7px;
 }
 
+/*
+ * "Start fresh" takes only the room its label needs, so the recommended choice
+ * keeps its full sentence on one line at a narrow panel width instead of
+ * wrapping into a two-line block.
+ */
 .resume .ladder-row {
   margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.resume .ghost {
+  flex: 0 0 auto;
 }
 
 @keyframes fade-in {
