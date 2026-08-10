@@ -24,7 +24,7 @@ if (pidFile) writeFileSync(pidFile, String(process.pid), 'utf8');
 const say = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 const delta = (text) => say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
 const thinking = () => say({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } });
-const result = (extra) => say({ type: 'result', subtype: 'success', num_turns: 1, ...extra });
+const result = ({ subtype = 'success', ...extra } = {}) => say({ type: 'result', subtype, num_turns: 1, ...extra });
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -90,8 +90,15 @@ switch (model) {
   }
 
   case 'scenario-no-partials': {
-    // A future CLI that stops emitting deltas but still returns a result.
+    // A future CLI that stops emitting deltas but still returns assistant text.
     result({ is_error: false, result: 'the whole answer at once' });
+    break;
+  }
+
+  case 'scenario-no-partials-diagnostic': {
+    // Terminates without is_error, but the subtype says `result` holds a CLI
+    // diagnostic rather than anything the model said. Nothing to show.
+    result({ subtype: 'error_max_turns', is_error: false, result: 'Reached maximum number of turns.' });
     break;
   }
 

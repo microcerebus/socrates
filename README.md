@@ -192,6 +192,7 @@ Open the gear in the panel header.
 
 **Where replies come from** is the provider switch described above, with each option's cost stated under it.
 It takes effect on your next message, with no reload, because the worker reads settings per turn rather than caching them.
+Changing provider and model back to back is safe: each change is a patch against the newest intent rather than a whole object built from stale state, and writes are serialised, so the second change cannot undo the first (`src/panel/settings-writer.ts`).
 
 | Model | When |
 | --- | --- |
@@ -263,7 +264,7 @@ The native host is a sixth artefact built for Node.
 | `tests/scraper.test.ts` | The scraper against saved LeetCode HTML: current layout, a drifted layout, and an unrecognisable one |
 | `tests/native-host.test.ts` | Native messaging framing, config parsing, status parsing, and every vault failure branch against a fake `dcli` |
 | `tests/claude-host.test.ts` | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
-| `tests/claude-code.test.ts` | The extension half: the streaming port, cancellation, error mapping, transcript flattening, the settings switch, and that both providers redact identically |
+| `tests/claude-code.test.ts` | The extension half: the streaming port, cancellation, error mapping, transcript flattening, race-safe settings writes, and that both providers redact identically |
 | `tests/dcli-contract.test.ts` | That the real `dcli status` still emits the lines the classifier reads. Skipped when `dcli` is not installed |
 | `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed |
 

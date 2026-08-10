@@ -10,7 +10,14 @@
 
 import type { spawn as nodeSpawn, ChildProcess } from 'node:child_process';
 
-import { CLAUDE_ENV, LineSplitter, claudeArgs, parseClaudeLine, type RateLimitState } from './claude.ts';
+import {
+  ASSISTANT_RESULT_SUBTYPE,
+  CLAUDE_ENV,
+  LineSplitter,
+  claudeArgs,
+  parseClaudeLine,
+  type RateLimitState,
+} from './claude.ts';
 import { classifyClaudeFailure, claudeMissing, findClaude, type HostDeps } from './handler.ts';
 import type { HostRequest, HostResponse } from './protocol.ts';
 
@@ -61,7 +68,7 @@ export function startClaudeRun(
 
   const splitter = new LineSplitter();
   let rateLimit: RateLimitState | null = null;
-  let result: { isError: boolean; message: string; apiErrorStatus: number | null } | null = null;
+  let result: { isError: boolean; message: string; apiErrorStatus: number | null; subtype: string } | null = null;
   let sawText = false;
   let sawThinking = false;
   let cancelled = false;
@@ -93,7 +100,12 @@ export function startClaudeRun(
         rateLimit = { status: event.status, resetsAt: event.resetsAt };
         break;
       case 'result':
-        result = { isError: event.isError, message: event.message, apiErrorStatus: event.apiErrorStatus };
+        result = {
+          isError: event.isError,
+          message: event.message,
+          apiErrorStatus: event.apiErrorStatus,
+          subtype: event.subtype,
+        };
         break;
     }
   };
@@ -114,15 +126,28 @@ export function startClaudeRun(
     if (cancelled) return;
 
     const outcome = result;
-    if (spawnErrorCode === undefined && outcome !== null && !outcome.isError) {
-      // The deltas are the reply. This fallback only fires if a future CLI stops
-      // emitting partial messages, where a whole answer at once beats a blank panel.
-      if (!sawText && outcome.message !== '') {
-        emit({ ok: true, kind: 'claude-delta', requestId, text: outcome.message });
-      }
+    /*
+     * The deltas are the reply. The fallback exists only for a future CLI that
+     * stops emitting partial messages, where a whole answer at once beats a
+     * blank panel - and it is allowed only when the result frame says the field
+     * holds assistant text. Every other subtype puts a CLI diagnostic there, and
+     * forwarding one would print the CLI's complaint as though the interviewer
+     * had said it. `is_error: false` is not enough on its own: it has been seen
+     * alongside subtypes that carry no reply at all.
+     */
+    const fallbackText =
+      !sawText && outcome !== null && outcome.subtype === ASSISTANT_RESULT_SUBTYPE ? outcome.message : '';
+    const haveReply = sawText || fallbackText !== '';
+
+    if (spawnErrorCode === undefined && outcome !== null && !outcome.isError && haveReply) {
+      if (fallbackText !== '') emit({ ok: true, kind: 'claude-delta', requestId, text: fallbackText });
       emit({ ok: true, kind: 'claude-done', requestId });
       return;
     }
+
+    // Falling through means there is no reply to show. Saying nothing at all
+    // would be the silent spinner this project refuses; the diagnostic still
+    // reaches the user, quoted as claude's words rather than passed off as one.
 
     void classifyClaudeFailure(
       {

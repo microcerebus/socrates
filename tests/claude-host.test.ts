@@ -17,6 +17,7 @@ import process from 'node:process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  ASSISTANT_RESULT_SUBTYPE,
   CLAUDE_ENV,
   CLAUDE_LOGIN_COMMAND,
   LineSplitter,
@@ -152,9 +153,21 @@ describe('reading the CLI stream', () => {
       parseClaudeLine(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 12 } })),
     ).toEqual({ kind: 'rate-limit', status: 'allowed', resetsAt: 12 });
 
-    expect(parseClaudeLine(JSON.stringify({ type: 'result', is_error: true, result: 'boom', api_error_status: 429 }))).toEqual(
-      { kind: 'result', isError: true, message: 'boom', apiErrorStatus: 429 },
-    );
+    expect(
+      parseClaudeLine(
+        JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'boom', api_error_status: 429 }),
+      ),
+    ).toEqual({ kind: 'result', isError: true, message: 'boom', apiErrorStatus: 429, subtype: 'success' });
+  });
+
+  it('keeps the result subtype, which is what says whether `result` is assistant text', () => {
+    const at = (subtype: unknown): unknown =>
+      parseClaudeLine(JSON.stringify({ type: 'result', subtype, is_error: false, result: 'x' }));
+
+    expect(at('success')).toMatchObject({ subtype: ASSISTANT_RESULT_SUBTYPE });
+    expect(at('error_max_turns')).toMatchObject({ subtype: 'error_max_turns' });
+    // A CLI that stops sending one must not be read as if it had sent "success".
+    expect(at(undefined)).toMatchObject({ subtype: '' });
   });
 
   it('shrugs off blank lines and anything that is not JSON', () => {
@@ -430,6 +443,24 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
     const frames = await collect('scenario-no-partials');
     expect(textOf(frames)).toBe('the whole answer at once');
     expect(frames.at(-1)).toMatchObject({ ok: true, kind: 'claude-done' });
+  });
+
+  it('never passes a CLI diagnostic off as the interviewer, even on a run that did not error', async () => {
+    // `is_error: false`, but the subtype says `result` holds the CLI's own
+    // complaint rather than anything the model said.
+    const frames = await collect('scenario-no-partials-diagnostic');
+
+    expect(textOf(frames)).toBe('');
+    expect(frames.some((frame) => frame.ok && frame.kind === 'claude-delta')).toBe(false);
+    expect(frames.some((frame) => frame.ok && frame.kind === 'claude-done')).toBe(false);
+
+    // And it is not swallowed either - the diagnostic reaches the user, quoted.
+    const last = frames.at(-1);
+    expect(last).toMatchObject({ ok: false, code: 'claude-cli-failed', requestId: 'req-1' });
+    if (last && !last.ok) {
+      expect(last.message).toContain('Reached maximum number of turns.');
+      expect(last.message).toContain('claude said:');
+    }
   });
 
   it('reports a missing binary instead of spawning nothing and going quiet', async () => {

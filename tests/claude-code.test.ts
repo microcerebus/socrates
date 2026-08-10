@@ -16,9 +16,10 @@ import { hostFailureToAppError } from '../src/background/host-errors.ts';
 import { runInterviewTurn } from '../src/background/interview.ts';
 import { apiKeyProvider, claudeCodeProvider, flattenMessages } from '../src/background/providers.ts';
 import { getSettings, setSettings } from '../src/background/session-store.ts';
+import { createSettingsWriter } from '../src/panel/settings-writer.ts';
 import { WITHHELD_NOTICE } from '../src/prompt/spoiler-guard.ts';
 import type { HostResponse } from '../src/native-host/protocol.ts';
-import { DEFAULT_SETTINGS, type AppError, type Rung } from '../src/shared/types.ts';
+import { DEFAULT_SETTINGS, appError, type AppError, type Rung, type Settings } from '../src/shared/types.ts';
 import { askRequest, mockAnthropic, sseBody } from './helpers.ts';
 
 // --- a native port that never leaves the process -----------------------------
@@ -369,5 +370,138 @@ describe('the provider setting', () => {
   it('refuses a provider or model it does not know', async () => {
     const stored = { provider: 'chatgpt', model: 'gpt-9' } as unknown as Parameters<typeof setSettings>[0];
     await expect(setSettings(stored)).resolves.toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe('saving a settings change', () => {
+  /**
+   * A worker stand-in that answers writes only when told to, and in whatever
+   * order it is told to - the two ways this used to go wrong.
+   */
+  function fakeWorker() {
+    const pending: { settings: Settings; resolve(): void; reject(error: AppError): void }[] = [];
+    const shown: Settings[] = [];
+    const errors: AppError[] = [];
+    /** What the worker's storage holds, written in the order writes arrive. */
+    let stored: Settings = { ...DEFAULT_SETTINGS };
+
+    const writer = createSettingsWriter({
+      save: (settings) =>
+        new Promise<Settings>((resolvePromise, rejectPromise) => {
+          pending.push({
+            settings,
+            resolve: () => {
+              stored = settings;
+              resolvePromise(settings);
+            },
+            reject: rejectPromise,
+          });
+        }),
+      onSettings: (settings) => shown.push(settings),
+      onError: (error) => errors.push(error),
+    });
+
+    return {
+      writer,
+      pending,
+      shown,
+      errors,
+      get stored(): Settings {
+        return stored;
+      },
+      get displayed(): Settings | undefined {
+        return shown.at(-1);
+      },
+      /** Let the microtask queue - and therefore the write chain - run on. */
+      settle: () => new Promise<void>((r) => setTimeout(r, 0)),
+    };
+  }
+
+  it('keeps both changes when provider and model are switched back to back', async () => {
+    const worker = fakeWorker();
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+
+    // Faster than a round trip: the second handler used to read the state as it
+    // was before the first, and write a whole object that undid it.
+    worker.writer.patch({ provider: 'api-key' });
+    worker.writer.patch({ model: 'claude-opus-5' });
+
+    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+
+    await worker.settle();
+    worker.pending[0]?.resolve();
+    await worker.settle();
+    worker.pending[1]?.resolve();
+    await worker.settle();
+
+    expect(worker.stored).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+  });
+
+  it('serialises writes, so the worker sees them in the order they were made', async () => {
+    const worker = fakeWorker();
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+
+    worker.writer.patch({ provider: 'api-key' });
+    worker.writer.patch({ model: 'claude-opus-5' });
+    await worker.settle();
+
+    // The second write is not even issued until the first has answered, so the
+    // worker cannot apply them out of order.
+    expect(worker.pending).toHaveLength(1);
+    expect(worker.pending[0]?.settings).toEqual({ provider: 'api-key', model: 'claude-sonnet-5' });
+
+    worker.pending[0]?.resolve();
+    await worker.settle();
+
+    expect(worker.pending).toHaveLength(2);
+    expect(worker.pending[1]?.settings).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+  });
+
+  it('ignores a reply that a later change has already superseded', async () => {
+    const worker = fakeWorker();
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+
+    worker.writer.patch({ provider: 'api-key' });
+    await worker.settle();
+    worker.writer.patch({ provider: 'claude-code' });
+
+    // The first write answers after the user has already changed their mind.
+    worker.pending[0]?.resolve();
+    await worker.settle();
+
+    expect(worker.displayed?.provider).toBe('claude-code');
+  });
+
+  it('undoes the optimistic value when the write fails, and says why', async () => {
+    const worker = fakeWorker();
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+
+    worker.writer.patch({ provider: 'api-key' });
+    expect(worker.displayed?.provider).toBe('api-key');
+
+    await worker.settle();
+    worker.pending[0]?.reject(appError('api-error', 'storage is full'));
+    await worker.settle();
+
+    expect(worker.displayed).toEqual({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    expect(worker.errors).toHaveLength(1);
+    expect(worker.errors[0]?.message).toBe('storage is full');
+  });
+
+  it('does not undo anything when a newer change is already on its way', async () => {
+    const worker = fakeWorker();
+    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+
+    worker.writer.patch({ provider: 'api-key' });
+    await worker.settle();
+    worker.writer.patch({ model: 'claude-opus-5' });
+
+    worker.pending[0]?.reject(appError('api-error', 'transient'));
+    await worker.settle();
+
+    // The newer intent stands; only the failure is reported.
+    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.errors).toHaveLength(1);
   });
 });

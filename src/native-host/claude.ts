@@ -78,11 +78,28 @@ export const CLAUDE_ENV: Readonly<Record<string, string>> = {
 export const CLAUDE_LOGIN_COMMAND = 'claude auth login';
 export const CLAUDE_STATUS_COMMAND = 'claude auth status';
 
+/**
+ * The only `result` subtype whose `result` field is the model's own text.
+ *
+ * Every other subtype (`error_max_turns`, `error_during_execution`, whatever
+ * gets added next) puts a CLI diagnostic there instead. They are not
+ * interchangeable, and treating them as such would print the CLI's complaint
+ * into the panel as though the interviewer had said it.
+ */
+export const ASSISTANT_RESULT_SUBTYPE = 'success';
+
 export type ClaudeEvent =
   | { kind: 'text'; text: string }
   | { kind: 'thinking' }
   | { kind: 'rate-limit'; status: string; resetsAt: number | null }
-  | { kind: 'result'; isError: boolean; message: string; apiErrorStatus: number | null };
+  | {
+      kind: 'result';
+      isError: boolean;
+      message: string;
+      apiErrorStatus: number | null;
+      /** `''` when the CLI did not say, which is never treated as assistant text. */
+      subtype: string;
+    };
 
 interface StreamFrame {
   type?: unknown;
@@ -91,6 +108,7 @@ interface StreamFrame {
   is_error?: unknown;
   result?: unknown;
   api_error_status?: unknown;
+  subtype?: unknown;
 }
 
 /**
@@ -139,6 +157,7 @@ export function parseClaudeLine(line: string): ClaudeEvent | null {
       isError: frame.is_error === true,
       message: typeof frame.result === 'string' ? frame.result : '',
       apiErrorStatus: typeof frame.api_error_status === 'number' ? frame.api_error_status : null,
+      subtype: typeof frame.subtype === 'string' ? frame.subtype : '',
     };
   }
 

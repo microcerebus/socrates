@@ -25,6 +25,7 @@ import {
   type ProbeState,
 } from './components.tsx';
 import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
+import { createSettingsWriter } from './settings-writer.ts';
 
 /**
  * The panel document is created fresh each time the side panel opens, so module
@@ -62,6 +63,13 @@ export function App(): ReactNode {
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
 
+  // Holds the settings intent across renders, so a change is a patch against the
+  // newest one rather than against whatever this render closed over.
+  const settingsWriter = useMemo(
+    () => createSettingsWriter({ save: (next) => client.setSettings(next), onSettings: setSettings, onError: setError }),
+    [client],
+  );
+
   useEffect(() => {
     const timer = setInterval(() => setElapsedMs(Date.now() - SESSION_STARTED_AT), 1000);
     return () => clearInterval(timer);
@@ -78,7 +86,10 @@ export function App(): ReactNode {
   );
 
   useEffect(() => {
-    void client.getSettings().then(setSettings).catch(() => undefined);
+    void client
+      .getSettings()
+      .then((stored) => settingsWriter.adopt(stored))
+      .catch(() => undefined);
 
     void (async () => {
       const tabId = await activeTabId();
@@ -96,7 +107,7 @@ export function App(): ReactNode {
         setShowPaste(true);
       }
     })();
-  }, [client, loadAttempts]);
+  }, [client, loadAttempts, settingsWriter]);
 
   /** Re-reads the page so the model always sees the current editor buffer. */
   const freshSnapshot = useCallback(async (): Promise<PageSnapshot | null> => {
@@ -198,15 +209,12 @@ export function App(): ReactNode {
 
   const nextRung = (): Rung => (started ? (Math.min(rung + 1, 5) as Rung) : 0);
 
-  const saveSettings = (next: Settings): void => {
-    void client
-      .setSettings(next)
-      .then(setSettings)
-      .catch((failure: AppError) => setError(failure));
-  };
-
-  const onSelectModel = (model: ModelId): void => saveSettings({ ...settings, model });
-  const onSelectProvider = (provider: ProviderId): void => saveSettings({ ...settings, provider });
+  // Each change is a patch against the writer's own newest intent, not against
+  // this render's `settings` - switching provider and then model is faster than
+  // a round trip, and a whole-object write built from stale state undoes the
+  // change before it. See `settings-writer.ts`.
+  const onSelectModel = (model: ModelId): void => settingsWriter.patch({ model });
+  const onSelectProvider = (provider: ProviderId): void => settingsWriter.patch({ provider });
 
   // Loaded when Settings opens, so the panel can name the configured Dashlane
   // item and the resolved claude binary instead of hardcoding either.
