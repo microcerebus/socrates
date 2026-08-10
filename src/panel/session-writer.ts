@@ -1,5 +1,16 @@
 /**
- * Deciding whether a session is still worth saving.
+ * The panel's synchronous truth about which problem it is on, and what may be
+ * written for it.
+ *
+ * Everything else in the panel is React state, which is *scheduled* rather than
+ * applied: anything running before the next render still sees the previous
+ * values out of a closure. Three separate bugs came out of that, all of them
+ * writing or displaying the wrong problem's work, so the decisions that must be
+ * right in the same tick they are made live here instead - which is the same
+ * reason `settings-writer.ts` keeps the settings intent outside React.
+ *
+ * It owns three things: whether a session has been discarded, which problem is
+ * active, and whether an in-flight page read has been overtaken by a navigation.
  *
  * ## The bug this exists to make impossible
  *
@@ -29,6 +40,13 @@
 
 import type { StoredSession } from '../shared/types.ts';
 
+/**
+ * The outcome of a page read that may have been overtaken by a navigation.
+ * `stale` means the panel moved to a different problem while it was in flight,
+ * so whatever came back describes a page the user is no longer looking at.
+ */
+export type Current<T> = { current: true; value: T } | { current: false };
+
 export interface SessionWriterOptions {
   save(session: StoredSession): Promise<unknown>;
   clear(slug: string): Promise<unknown>;
@@ -54,10 +72,34 @@ export interface SessionWriter {
    * left, because from this moment saves for any other slug are refused.
    */
   setActive(slug: string): void;
+  /**
+   * Run an asynchronous read of the page, and throw its result away if the panel
+   * followed the page to a different problem while it was outstanding.
+   *
+   * This is the guard that has to be applied at *resolution*, not at
+   * initiation. A capture takes a round trip through the worker and the content
+   * script, and the user can navigate inside that window. Everything the caller
+   * closed over when it started - the snapshot, the transcript, the rung - then
+   * describes a problem that is no longer on screen, so a result compared
+   * against it reaches exactly the wrong conclusion: a stale capture of the old
+   * problem looks like an ordinary refresh, and the panel walks itself back to
+   * the problem the user just left.
+   *
+   * The result is wrapped rather than collapsed to `null`, because "we navigated
+   * away" and "the page could not be read" need opposite handling - the first
+   * abandons the turn, the second falls back to the snapshot already on screen -
+   * and both of the reads this guards can legitimately answer `null`.
+   *
+   * Rejections are passed through untouched; only a *successful* stale result is
+   * dropped.
+   */
+  ifStillCurrent<T>(work: () => Promise<T>): Promise<Current<T>>;
   /** Which slug is currently discarded, if any. Exposed for tests. */
   readonly discarded: string | null;
   /** Which problem the panel believes it is showing. Exposed for tests. */
   readonly active: string | null;
+  /** How many times the panel has moved to a different problem. */
+  readonly generation: number;
 }
 
 export function createSessionWriter(options: SessionWriterOptions): SessionWriter {
@@ -76,6 +118,14 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
    */
   let active: string | null = null;
 
+  /*
+   * Counts problem changes, not calls. Anything that was awaiting across a bump
+   * is describing a page the panel has already moved on from - including the
+   * A -> B -> A case, where comparing slugs alone would wrongly conclude that
+   * nothing had happened.
+   */
+  let generation = 0;
+
   return {
     get discarded(): string | null {
       return discarded;
@@ -83,6 +133,16 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
 
     get active(): string | null {
       return active;
+    },
+
+    get generation(): number {
+      return generation;
+    },
+
+    async ifStillCurrent<T>(work: () => Promise<T>): Promise<Current<T>> {
+      const startedAt = generation;
+      const value = await work();
+      return generation === startedAt ? { current: true, value } : { current: false };
     },
 
     save(session): void {
@@ -104,7 +164,11 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
     },
 
     setActive(slug): void {
+      // Re-adopting the same problem is not a navigation, and bumping for it
+      // would cancel captures that are still perfectly valid.
+      if (active === slug) return;
       active = slug;
+      generation += 1;
     },
   };
 }

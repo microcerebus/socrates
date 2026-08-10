@@ -134,22 +134,27 @@ export function App(): ReactNode {
 
   const loadAttempts = useCallback(
     (slug: string) => {
-      void client.getAttempts(slug).then(setAllAttempts).catch(() => undefined);
+      void sessionWriter
+        .ifStillCurrent(() => client.getAttempts(slug))
+        .then((result) => {
+          if (result.current) setAllAttempts(result.value);
+        })
+        .catch(() => undefined);
     },
-    [client],
+    [client, sessionWriter],
   );
 
   /** Offers a resume when there is a transcript worth resuming, and nothing else. */
   const offerResume = useCallback(
     (slug: string) => {
-      void client
-        .getSession(slug)
-        .then((session) => {
-          if (session && session.turns.length > 0) setResumable(session);
+      void sessionWriter
+        .ifStillCurrent(() => client.getSession(slug))
+        .then((result) => {
+          if (result.current && result.value && result.value.turns.length > 0) setResumable(result.value);
         })
         .catch(() => undefined);
     },
-    [client],
+    [client, sessionWriter],
   );
 
   useEffect(() => {
@@ -283,7 +288,19 @@ export function App(): ReactNode {
    * followed it, which resets the ladder and is not a turn.
    */
   const snapshotForTurn = useCallback(async (): Promise<PageSnapshot | null> => {
-    const outcome = classifyCapture(snapshot, await captureLive());
+    /*
+     * The capture is guarded at resolution, not at initiation. If the panel
+     * followed the page while it was outstanding, `snapshot` and everything else
+     * this callback closed over describe a problem the user has left - and
+     * classifying a stale capture of that problem against that stale snapshot
+     * reads as an ordinary refresh, which would drag the panel back to it and
+     * then run and stream a turn there. The turn is abandoned instead; the panel
+     * has already adopted the new problem.
+     */
+    const capture = await sessionWriter.ifStillCurrent(captureLive);
+    if (!capture.current) return null;
+
+    const outcome = classifyCapture(snapshot, capture.value);
     switch (outcome.kind) {
       case 'unchanged':
         return snapshot;
@@ -294,7 +311,7 @@ export function App(): ReactNode {
         adoptProblem(outcome.snapshot);
         return null;
     }
-  }, [adoptProblem, captureLive, snapshot]);
+  }, [adoptProblem, captureLive, sessionWriter, snapshot]);
 
   /*
    * Notice the navigation when it happens rather than at the next click, so the

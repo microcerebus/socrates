@@ -499,3 +499,96 @@ describe('following the page to another problem', () => {
     expect(await getSession('lru-cache')).toBeNull();
   });
 });
+
+/**
+ * Navigating *while a capture is in flight*.
+ *
+ * A capture is a read of the page that finishes later, and the user can navigate
+ * inside that window. The guard therefore has to run at resolution, not at
+ * initiation: at initiation everything still looks consistent. Checked at
+ * resolution, a stale capture of the problem the user left is recognisably stale;
+ * checked only at initiation, it looks like an ordinary refresh, and the panel
+ * walks itself back to that problem and streams a whole turn there - a turn whose
+ * transcript save is then refused by the active-slug guard, so the model work is
+ * paid for and thrown away.
+ */
+describe('a capture overtaken by a navigation', () => {
+  function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  function writer(): ReturnType<typeof createSessionWriter> {
+    return createSessionWriter({ save: () => Promise.resolve(null), clear: () => Promise.resolve(null) });
+  }
+
+  it('counts a move to another problem, but not re-adopting the same one', () => {
+    const w = writer();
+    expect(w.generation).toBe(0);
+    w.setActive('two-sum');
+    expect(w.generation).toBe(1);
+    w.setActive('two-sum');
+    expect(w.generation).toBe(1);
+    w.setActive('lru-cache');
+    expect(w.generation).toBe(2);
+  });
+
+  it('passes a capture through when nothing moved', async () => {
+    const w = writer();
+    w.setActive('two-sum');
+    expect(await w.ifStillCurrent(() => Promise.resolve(SNAPSHOT))).toEqual({ current: true, value: SNAPSHOT });
+  });
+
+  /* The blocker: navigate while the capture is outstanding. */
+  it('drops a capture that resolves after the panel followed the page', async () => {
+    const w = writer();
+    w.setActive('two-sum');
+    const capture = deferred<PageSnapshot>();
+
+    const pending = w.ifStillCurrent(() => capture.promise);
+    w.setActive('lru-cache'); // the user navigates, mid-capture
+    capture.resolve(SNAPSHOT); // the old problem's capture finally lands
+
+    expect(await pending).toEqual({ current: false });
+  });
+
+  /* Comparing slugs alone would call this unchanged and let the turn run. */
+  it('drops it even when the panel ends up back where it started', async () => {
+    const w = writer();
+    w.setActive('two-sum');
+    const capture = deferred<PageSnapshot>();
+
+    const pending = w.ifStillCurrent(() => capture.promise);
+    w.setActive('lru-cache');
+    w.setActive('two-sum');
+    capture.resolve(SNAPSHOT);
+
+    expect(await pending).toEqual({ current: false });
+  });
+
+  /*
+   * "Navigated away" and "the page could not be read" are different answers: the
+   * first must abandon the turn, the second falls back to what is on screen. So
+   * a legitimate null is not allowed to look like staleness.
+   */
+  it('distinguishes an unreadable page from a stale one', async () => {
+    const w = writer();
+    w.setActive('two-sum');
+    expect(await w.ifStillCurrent(() => Promise.resolve(null))).toEqual({ current: true, value: null });
+  });
+
+  it('lets a rejection through rather than disguising it as staleness', async () => {
+    const w = writer();
+    w.setActive('two-sum');
+    await expect(w.ifStillCurrent(() => Promise.reject(new Error('port died')))).rejects.toThrow('port died');
+  });
+
+  it('keeps guarding reads issued after the navigation', async () => {
+    const w = writer();
+    w.setActive('two-sum');
+    w.setActive('lru-cache');
+    // Issued on lru-cache and resolving on lru-cache: perfectly current.
+    expect(await w.ifStillCurrent(() => Promise.resolve('ok'))).toEqual({ current: true, value: 'ok' });
+  });
+});
