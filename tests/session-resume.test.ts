@@ -525,13 +525,13 @@ describe('a capture overtaken by a navigation', () => {
 
   it('counts a move to another problem, but not re-adopting the same one', () => {
     const w = writer();
-    expect(w.generation).toBe(0);
+    expect(w.epoch).toBe(0);
     w.setActive('two-sum');
-    expect(w.generation).toBe(1);
+    expect(w.epoch).toBe(1);
     w.setActive('two-sum');
-    expect(w.generation).toBe(1);
+    expect(w.epoch).toBe(1);
     w.setActive('lru-cache');
-    expect(w.generation).toBe(2);
+    expect(w.epoch).toBe(2);
   });
 
   it('passes a capture through when nothing moved', async () => {
@@ -590,5 +590,141 @@ describe('a capture overtaken by a navigation', () => {
     w.setActive('lru-cache');
     // Issued on lru-cache and resolving on lru-cache: perfectly current.
     expect(await w.ifStillCurrent(() => Promise.resolve('ok'))).toEqual({ current: true, value: 'ok' });
+  });
+});
+
+/**
+ * The class, not the symptom: rapid A -> B -> C with the captures resolving in
+ * either order.
+ *
+ * Every read of the page is stamped with the navigation epoch it was issued in
+ * and dropped if that epoch has passed, which stops a late read dragging the
+ * panel backwards. On its own that is still not enough: if B's read lands first
+ * the panel adopts B, which invalidates C's read, and the panel would sit on B
+ * while the page shows C. So the follower reads again after every adoption, in
+ * the new epoch, until the page and the panel agree. These tests model that loop
+ * against both resolution orders.
+ */
+describe('rapid navigation with out-of-order resolutions', () => {
+  const page = (slug: string): PageSnapshot => ({ ...SNAPSHOT, problem: { ...SNAPSHOT.problem, slug } });
+
+  /**
+   * The follower from `App.tsx`, with React removed: read, drop if stale,
+   * adopt on a switch, and read again until it settles.
+   */
+  async function follow(
+    w: ReturnType<typeof createSessionWriter>,
+    start: PageSnapshot | null,
+    read: () => Promise<PageSnapshot | null>,
+    adopt: (next: PageSnapshot) => void,
+  ): Promise<void> {
+    let showing = start;
+    for (let step = 0; step < 5; step += 1) {
+      const capture = await w.ifStillCurrent(read);
+      if (!capture.current) return;
+      const outcome = classifyCapture(showing, capture.value);
+      if (outcome.kind !== 'switched') return;
+      adopt(outcome.snapshot);
+      showing = outcome.snapshot;
+    }
+  }
+
+  /** A page that reports a queue of values, then whatever it settled on. */
+  function pageReader(queue: (PageSnapshot | null)[], settled: PageSnapshot): () => Promise<PageSnapshot | null> {
+    return () => Promise.resolve(queue.length > 0 ? (queue.shift() ?? null) : settled);
+  }
+
+  function panel(): {
+    writer: ReturnType<typeof createSessionWriter>;
+    adopt: (next: PageSnapshot) => void;
+    adopted: string[];
+  } {
+    const adopted: string[] = [];
+    const w = createSessionWriter({ save: () => Promise.resolve(null), clear: () => Promise.resolve(null) });
+    return {
+      writer: w,
+      adopted,
+      adopt: (next) => {
+        adopted.push(next.problem.slug);
+        w.setActive(next.problem.slug);
+      },
+    };
+  }
+
+  it('lands on C when the newest capture resolves first', async () => {
+    const { writer: w, adopt, adopted } = panel();
+    w.setActive('a');
+    await follow(w, page('a'), pageReader([page('c')], page('c')), adopt);
+    expect(adopted).toEqual(['c']);
+    expect(w.active).toBe('c');
+  });
+
+  /* The reported ordering: B lands first and must not be where we stop. */
+  it('lands on C when a stale B capture resolves first', async () => {
+    const { writer: w, adopt, adopted } = panel();
+    w.setActive('a');
+    await follow(w, page('a'), pageReader([page('b')], page('c')), adopt);
+    expect(adopted.at(-1)).toBe('c');
+    expect(w.active).toBe('c');
+  });
+
+  it('discards a stale read issued before an adoption', async () => {
+    const { writer: w, adopt } = panel();
+    w.setActive('a');
+
+    let release!: (value: PageSnapshot) => void;
+    const slow = new Promise<PageSnapshot>((r) => (release = r));
+    const pending = follow(w, page('a'), () => slow, adopt);
+
+    // Another follower wins the race and adopts C first.
+    adopt(page('c'));
+    release(page('b')); // the old read finally lands
+    await pending;
+
+    expect(w.active).toBe('c');
+  });
+
+  it('settles without adopting anything when the page never moved', async () => {
+    const { writer: w, adopt, adopted } = panel();
+    w.setActive('a');
+    await follow(w, page('a'), pageReader([], page('a')), adopt);
+    expect(adopted).toEqual([]);
+    expect(w.epoch).toBe(1);
+  });
+
+  it('stops rather than looping forever on a page that never settles', async () => {
+    const { writer: w, adopt, adopted } = panel();
+    w.setActive('a');
+    let n = 0;
+    await follow(w, page('a'), () => Promise.resolve(page(`p-${(n += 1)}`)), adopt);
+    expect(adopted).toHaveLength(5);
+  });
+
+  it('leaves the panel on C after a full A-B-C walk, whatever the order', async () => {
+    for (const queue of [[page('b'), page('c')], [page('c')], [page('c'), page('c')]]) {
+      const { writer: w, adopt } = panel();
+      w.setActive('a');
+      await follow(w, page('a'), pageReader(queue, page('c')), adopt);
+      expect(w.active).toBe('c');
+    }
+  });
+
+  /*
+   * The honest boundary. The loop resolves ordering *within* one burst of
+   * navigation events; it does not poll. If the page still reports B when the
+   * loop re-reads, B is genuinely what is on screen at that moment, so it
+   * settles there and waits - and the navigation to C raises its own tab event,
+   * which starts a new follow. Documented because it is the reason the loop can
+   * terminate at all.
+   */
+  it('settles on what the page currently reports and waits for the next event', async () => {
+    const { writer: w, adopt, adopted } = panel();
+    w.setActive('a');
+    await follow(w, page('a'), pageReader([page('b')], page('b')), adopt);
+    expect(adopted).toEqual(['b']);
+
+    // The later navigation to C arrives as its own event.
+    await follow(w, page('b'), pageReader([], page('c')), adopt);
+    expect(w.active).toBe('c');
   });
 });

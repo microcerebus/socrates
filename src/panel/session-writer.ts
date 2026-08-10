@@ -42,8 +42,9 @@ import type { StoredSession } from '../shared/types.ts';
 
 /**
  * The outcome of a page read that may have been overtaken by a navigation.
- * `stale` means the panel moved to a different problem while it was in flight,
- * so whatever came back describes a page the user is no longer looking at.
+ * `{ current: false }` means the panel moved to a different problem while the
+ * read was in flight, so whatever came back describes a page the user is no
+ * longer looking at.
  */
 export type Current<T> = { current: true; value: T } | { current: false };
 
@@ -73,8 +74,9 @@ export interface SessionWriter {
    */
   setActive(slug: string): void;
   /**
-   * Run an asynchronous read of the page, and throw its result away if the panel
-   * followed the page to a different problem while it was outstanding.
+   * Run an asynchronous read of the page in the current navigation epoch, and
+   * throw its result away if the panel adopted a different problem while it was
+   * outstanding.
    *
    * This is the guard that has to be applied at *resolution*, not at
    * initiation. A capture takes a round trip through the worker and the content
@@ -98,8 +100,13 @@ export interface SessionWriter {
   readonly discarded: string | null;
   /** Which problem the panel believes it is showing. Exposed for tests. */
   readonly active: string | null;
-  /** How many times the panel has moved to a different problem. */
-  readonly generation: number;
+  /**
+   * The navigation epoch: how many times the panel has moved to a different
+   * problem. Every asynchronous read of the page is stamped with the epoch it
+   * was issued in and is only believed if that epoch is still current, so
+   * out-of-order resolutions cannot drag the panel backwards.
+   */
+  readonly epoch: number;
 }
 
 export function createSessionWriter(options: SessionWriterOptions): SessionWriter {
@@ -119,12 +126,11 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
   let active: string | null = null;
 
   /*
-   * Counts problem changes, not calls. Anything that was awaiting across a bump
-   * is describing a page the panel has already moved on from - including the
-   * A -> B -> A case, where comparing slugs alone would wrongly conclude that
-   * nothing had happened.
+   * Counts problem changes, not calls. Anything awaiting across a bump describes
+   * a page the panel has already moved on from - including the A -> B -> A case,
+   * where comparing slugs alone would wrongly conclude nothing had happened.
    */
-  let generation = 0;
+  let epoch = 0;
 
   return {
     get discarded(): string | null {
@@ -135,14 +141,14 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
       return active;
     },
 
-    get generation(): number {
-      return generation;
+    get epoch(): number {
+      return epoch;
     },
 
     async ifStillCurrent<T>(work: () => Promise<T>): Promise<Current<T>> {
-      const startedAt = generation;
+      const startedIn = epoch;
       const value = await work();
-      return generation === startedAt ? { current: true, value } : { current: false };
+      return epoch === startedIn ? { current: true, value } : { current: false };
     },
 
     save(session): void {
@@ -168,7 +174,7 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
       // would cancel captures that are still perfectly valid.
       if (active === slug) return;
       active = slug;
-      generation += 1;
+      epoch += 1;
     },
   };
 }

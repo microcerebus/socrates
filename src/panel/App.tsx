@@ -29,13 +29,20 @@ import {
 } from './components.tsx';
 import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
 import { classifyCapture } from './problem-switch.ts';
-import { createSessionWriter } from './session-writer.ts';
+import { createSessionWriter, type Current } from './session-writer.ts';
 import { createSettingsWriter } from './settings-writer.ts';
 import { IDLE_PROGRESS, TIMEOUT_AFTER_MS, applyEvent, beginTurn, type TurnProgress } from './turn-progress.ts';
 import { REVEAL_WINDOW_MS, createTypewriter, type Typewriter } from './typewriter.ts';
 
 /** How often the clock the panel renders from advances. */
 const TICK_MS = 1000;
+
+/**
+ * How many times the navigation follower will re-read the page before giving up
+ * and waiting for the next tab event. Each step needs a real navigation to have
+ * happened, so this only bounds a pathological page that never settles.
+ */
+const MAX_FOLLOW_STEPS = 5;
 
 function nowIso(at: number): string {
   return new Date(at).toISOString();
@@ -118,6 +125,30 @@ export function App(): ReactNode {
     [client],
   );
 
+  /**
+   * The only way to read the page.
+   *
+   * The raw read is deliberately anonymous and lives inside this call: there is
+   * no unguarded capture to reach for, so "stamp the navigation epoch at
+   * initiation, drop the result if it is no longer current at resolution" is a
+   * property of the one function rather than a rule three call sites have to
+   * remember. The three that exist - first load, a turn, and the navigation
+   * follower - all go through here.
+   */
+  const capturePage = useCallback(
+    (): Promise<Current<{ snapshot: PageSnapshot | null; failure?: string }>> =>
+      sessionWriter.ifStillCurrent(async () => {
+        const tabId = await activeTabId();
+        if (tabId === null) return { snapshot: null, failure: 'no-active-tab' };
+        try {
+          return await client.capture(tabId);
+        } catch (cause) {
+          return { snapshot: null, failure: String(cause) };
+        }
+      }),
+    [client, sessionWriter],
+  );
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
@@ -164,24 +195,22 @@ export function App(): ReactNode {
       .catch(() => undefined);
 
     void (async () => {
-      const tabId = await activeTabId();
-      if (tabId === null) {
-        setCaptureFailure('no-active-tab');
-        setShowPaste(true);
-        return;
-      }
-      const result = await client.capture(tabId);
-      if (result.snapshot) {
-        setSnapshot(result.snapshot);
-        sessionWriter.setActive(result.snapshot.problem.slug);
-        loadAttempts(result.snapshot.problem.slug);
-        offerResume(result.snapshot.problem.slug);
+      // Guarded like every other read: a slow first capture must not overwrite a
+      // problem the follower has already adopted while it was in flight.
+      const capture = await capturePage();
+      if (!capture.current) return;
+      const { snapshot: page, failure } = capture.value;
+      if (page) {
+        setSnapshot(page);
+        sessionWriter.setActive(page.problem.slug);
+        loadAttempts(page.problem.slug);
+        offerResume(page.problem.slug);
       } else {
-        setCaptureFailure(result.failure ?? 'unknown');
+        setCaptureFailure(failure ?? 'unknown');
         setShowPaste(true);
       }
     })();
-  }, [client, loadAttempts, offerResume, sessionWriter, settingsWriter]);
+  }, [capturePage, client, loadAttempts, offerResume, sessionWriter, settingsWriter]);
 
   // ---- saving the session -------------------------------------------------
 
@@ -219,16 +248,6 @@ export function App(): ReactNode {
     globalThis.addEventListener('pagehide', onHide);
     return () => globalThis.removeEventListener('pagehide', onHide);
   }, [saveSession]);
-
-  const captureLive = useCallback(async (): Promise<PageSnapshot | null> => {
-    const tabId = await activeTabId();
-    if (tabId === null) return null;
-    try {
-      return (await client.capture(tabId)).snapshot;
-    } catch {
-      return null;
-    }
-  }, [client]);
 
   /**
    * Follow the page onto a different problem.
@@ -297,10 +316,10 @@ export function App(): ReactNode {
      * then run and stream a turn there. The turn is abandoned instead; the panel
      * has already adopted the new problem.
      */
-    const capture = await sessionWriter.ifStillCurrent(captureLive);
+    const capture = await capturePage();
     if (!capture.current) return null;
 
-    const outcome = classifyCapture(snapshot, capture.value);
+    const outcome = classifyCapture(snapshot, capture.value.snapshot);
     switch (outcome.kind) {
       case 'unchanged':
         return snapshot;
@@ -311,7 +330,7 @@ export function App(): ReactNode {
         adoptProblem(outcome.snapshot);
         return null;
     }
-  }, [adoptProblem, captureLive, sessionWriter, snapshot]);
+  }, [adoptProblem, capturePage, snapshot]);
 
   /*
    * Notice the navigation when it happens rather than at the next click, so the
@@ -321,12 +340,29 @@ export function App(): ReactNode {
    * between them.
    */
   useEffect(() => {
+    /*
+     * Settle on whatever the page actually is, rather than on whichever capture
+     * happened to land first.
+     *
+     * Discarding stale reads is necessary but not sufficient here. Navigating
+     * A -> B -> C leaves two reads in flight; if B's lands first the panel
+     * adopts B, which bumps the epoch and invalidates C's read - correctly, but
+     * that would strand the panel on B while the page shows C. So after every
+     * adoption it reads again, in the new epoch, and keeps going until the page
+     * and the panel agree. That converges because a capture matching what was
+     * just adopted classifies as `refreshed`, not `switched`.
+     */
     const follow = (): void => {
       void (async () => {
-        const outcome = classifyCapture(snapshot, await captureLive());
-        if (outcome.kind !== 'switched') return;
-        if (outcome.snapshot.problem.slug === sessionWriter.active) return;
-        adoptProblem(outcome.snapshot);
+        let showing = snapshot;
+        for (let step = 0; step < MAX_FOLLOW_STEPS; step += 1) {
+          const capture = await capturePage();
+          if (!capture.current) return; // a newer adoption already superseded this read
+          const outcome = classifyCapture(showing, capture.value.snapshot);
+          if (outcome.kind !== 'switched') return;
+          adoptProblem(outcome.snapshot);
+          showing = outcome.snapshot;
+        }
       })();
     };
     const onUpdated = (tabId: number, change: chrome.tabs.OnUpdatedInfo): void => {
@@ -341,7 +377,7 @@ export function App(): ReactNode {
       chrome.tabs.onUpdated.removeListener(onUpdated);
       chrome.tabs.onActivated.removeListener(follow);
     };
-  }, [adoptProblem, captureLive, sessionWriter, snapshot]);
+  }, [adoptProblem, capturePage, snapshot]);
 
   const persistAttempt = useCallback(
     (deepest: Rung, current: PageSnapshot) => {
