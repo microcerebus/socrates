@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Socrates",
+  "version": "0.1.0",
+  "description": "A personal interviewer for LeetCode practice: incremental hints, never the answer.",
+  "minimum_chrome_version": "116",
+  "_comment_key": "Pins the extension id to lbhnejceegeplldfheefbalbfnhdafnb so the native messaging host manifest keeps working when dist/ moves. This is a public key, not a secret.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiTiZMInR6TIkqwMnNyORdnK3TkwZNC0vkQuH8lFFHcW22XHA6PKA9CcjAJ16+Fo5rP79P2Zzr8/T7E7RaW5aj5sxJIOVGAUbXz7QUAP3LDPKUkm5V3sPQjPq50uwMehWaI2nNvFFCFpcnbF9Gy5yEMZLgbCVcED1Jn+giWR+iJNYmq34T6iFvCx2uLOSDem0O2/bFBpKW/emJ5hJA+ofE6B1SnVc6v8wvkmUJSgrRfjLaNdlj+OokGbfMi2yOGxRMGFLCiF5bZLaMWPP+S04wRQKQoCxFGfRrt9MVnXZf2EgXEfJJIaNHv5/D2Vc1q4v0As3RNoJPoMFKGYqzCJTmQIDAQAB",
+  "permissions": ["sidePanel", "storage", "scripting", "tabs", "nativeMessaging"],
+  "host_permissions": [
+    "https://leetcode.com/*",
+    "https://*.leetcode.com/*",
+    "https://api.anthropic.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "action": {
+    "default_title": "Socrates"
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["page-bridge.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://leetcode.com/problems/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

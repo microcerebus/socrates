@@ -1,0 +1,41 @@
+{
+  "name": "socrates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Chrome side-panel interviewer for LeetCode practice: incremental hints, never the answer.",
+  "packageManager": "pnpm@11.18.0",
+  "scripts": {
+    "build": "pnpm build:panel && pnpm build:worker && pnpm build:content && pnpm build:bridge && pnpm build:host",
+    "build:panel": "SOCRATES_TARGET=panel vite build",
+    "build:worker": "SOCRATES_TARGET=worker vite build",
+    "build:content": "SOCRATES_TARGET=content-script vite build",
+    "build:bridge": "SOCRATES_TARGET=page-bridge vite build",
+    "build:host": "SOCRATES_TARGET=native-host vite build",
+    "icons": "node scripts/make-icons.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.2.5",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "jsdom": "^30.0.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  }
+}
