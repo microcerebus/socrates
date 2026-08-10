@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Defensive: nothing that could hold a key belongs in this repo.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+secrets/
+native-host.json
+**/*.secret.*
