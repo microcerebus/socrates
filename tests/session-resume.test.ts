@@ -24,9 +24,11 @@ import {
   pruneSessions,
   saveSession,
 } from '../src/background/transcript-store.ts';
+import { classifyCapture } from '../src/panel/problem-switch.ts';
 import { createSessionWriter } from '../src/panel/session-writer.ts';
 import { hintsUsedFor } from '../src/prompt/rungs.ts';
-import type { Rung, StoredSession, Turn } from '../src/shared/types.ts';
+import type { PageSnapshot, Rung, StoredSession, Turn } from '../src/shared/types.ts';
+import { SNAPSHOT } from './helpers.ts';
 
 /**
  * A `chrome.storage.local` that lives and dies with the test.
@@ -399,5 +401,101 @@ describe('discarding a session', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(await getSession('two-sum')).toBeNull();
+  });
+});
+
+/**
+ * Navigating to another problem with the panel open.
+ *
+ * The panel is a view of whatever LeetCode is showing, but a stateful one: the
+ * transcript, the rung, the clock and the attempt id all belong to one problem.
+ * Keeping them across a navigation is not a cosmetic bug - the next turn runs
+ * against a statement the user is no longer looking at, its reply lands in the
+ * previous problem's session, and the *rung* carries over, which would hand out
+ * pseudocode for a problem where nothing was earned.
+ */
+describe('following the page to another problem', () => {
+  const twoSum = SNAPSHOT;
+  const lruCache: PageSnapshot = {
+    ...SNAPSHOT,
+    problem: { ...SNAPSHOT.problem, slug: 'lru-cache', title: '146. LRU Cache' },
+  };
+
+  it('treats a capture of the same problem as a refresh, not a switch', () => {
+    const outcome = classifyCapture(twoSum, { ...twoSum, capturedAt: 2 });
+    expect(outcome.kind).toBe('refreshed');
+  });
+
+  /* The blocker: this used to be discarded, leaving the panel on the old slug. */
+  it('reports a different slug as a switch instead of discarding it', () => {
+    const outcome = classifyCapture(twoSum, lruCache);
+    expect(outcome).toEqual({ kind: 'switched', snapshot: lruCache });
+  });
+
+  it('adopts the first problem it ever sees', () => {
+    expect(classifyCapture(null, twoSum)).toEqual({ kind: 'switched', snapshot: twoSum });
+  });
+
+  it('keeps what it has when the page cannot be read', () => {
+    expect(classifyCapture(twoSum, null)).toEqual({ kind: 'unchanged' });
+    expect(classifyCapture(null, null)).toEqual({ kind: 'unchanged' });
+  });
+
+  /* The paste box only exists because the page was unreadable; a later scrape of
+   * that same page must not throw away what the user typed to work around it. */
+  it('lets a pasted problem outrank the page', () => {
+    const pasted: PageSnapshot = { ...twoSum, problem: { ...twoSum.problem, source: 'manual' } };
+    expect(classifyCapture(pasted, lruCache)).toEqual({ kind: 'unchanged' });
+  });
+
+  it('refuses to persist a turn into the problem the panel has left', () => {
+    const saved: StoredSession[] = [];
+    const w = createSessionWriter({
+      save: (s) => {
+        saved.push(s);
+        return Promise.resolve(s);
+      },
+      clear: () => Promise.resolve(null),
+    });
+
+    w.setActive('two-sum');
+    // The switch: the old session is written while it is still the active one.
+    w.save(session({ slug: 'two-sum', rung: 4, deepestRung: 4 }));
+    w.setActive('lru-cache');
+    // A turn that was in flight during the navigation finishes now.
+    w.save(session({ slug: 'two-sum', rung: 5, deepestRung: 5 }));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.rung).toBe(4);
+  });
+
+  it('saves the new problem once it is the active one', () => {
+    const saved: StoredSession[] = [];
+    const w = createSessionWriter({
+      save: (s) => {
+        saved.push(s);
+        return Promise.resolve(s);
+      },
+      clear: () => Promise.resolve(null),
+    });
+    w.setActive('lru-cache');
+    w.save(session({ slug: 'lru-cache', rung: 1, deepestRung: 1 }));
+    expect(saved.map((s) => s.slug)).toEqual(['lru-cache']);
+  });
+
+  /* Navigate away, work on the new problem, come back: the first is untouched. */
+  it('leaves the old session intact and offers it again on return', async () => {
+    await saveSession(session({ slug: 'two-sum', rung: 4, deepestRung: 4 }));
+    await saveSession(session({ slug: 'lru-cache', rung: 1, deepestRung: 1 }));
+
+    const left = await getSession('two-sum');
+    expect(left?.rung).toBe(4);
+    expect(left?.turns).toHaveLength(2);
+    expect((await getSession('lru-cache'))?.rung).toBe(1);
+  });
+
+  it('has nothing to offer for a problem visited for the first time', async () => {
+    await saveSession(session({ slug: 'two-sum' }));
+    expect(await getSession('lru-cache')).toBeNull();
   });
 });

@@ -277,6 +277,14 @@ Resuming restores the conversation *and* the rung, so nothing is bought twice.
 Storage is bounded on four axes - characters per turn, turns per session, characters per session, and number of sessions - and the oldest are pruned first (`src/background/transcript-store.ts`).
 The page snapshot is deliberately not saved: it is re-scraped on resume, because a stale editor buffer would make "check my code" worse than useless.
 
+### Navigating with the panel open
+
+LeetCode is a single-page app, so you can move to another problem without the panel noticing on its own.
+It watches the tab and follows: the session you were on is written under its own slug, the panel adopts the new problem, and it offers that problem's stored session if there is one.
+
+The new problem starts at rung 0, like any first visit.
+Carrying the rung across a navigation would hand you pseudocode for a problem where you had earned nothing, which is the one thing the ladder exists to prevent.
+
 ## Session log
 
 Every attempt is recorded in `chrome.storage.local` as date, time spent, deepest rung reached, and hints used, keyed by problem slug.

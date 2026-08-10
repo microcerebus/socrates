@@ -36,8 +36,9 @@ export interface SessionWriterOptions {
 
 export interface SessionWriter {
   /**
-   * Persist this session, unless it describes one the user has discarded.
-   * A session with no turns is not worth a write and is silently skipped.
+   * Persist this session, unless it describes one the user has discarded or one
+   * the panel has already navigated away from. A session with no turns is not
+   * worth a write and is silently skipped.
    */
   save(session: StoredSession | null): void;
   /** Throw the stored session away, and refuse saves built from it. */
@@ -48,8 +49,15 @@ export interface SessionWriter {
    * again.
    */
   beginTurn(slug: string): void;
+  /**
+   * The problem the panel is showing now. Set it *after* saving the one being
+   * left, because from this moment saves for any other slug are refused.
+   */
+  setActive(slug: string): void;
   /** Which slug is currently discarded, if any. Exposed for tests. */
   readonly discarded: string | null;
+  /** Which problem the panel believes it is showing. Exposed for tests. */
+  readonly active: string | null;
 }
 
 export function createSessionWriter(options: SessionWriterOptions): SessionWriter {
@@ -59,14 +67,28 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
    */
   let discarded: string | null = null;
 
+  /*
+   * Which problem the panel is showing. A turn that finishes after the user has
+   * navigated away still carries the slug it ran against, and writing it then
+   * would resurrect a session the panel has already closed - so the write is
+   * refused rather than raced. `null` means nothing has been adopted yet, which
+   * is only true before the first capture lands.
+   */
+  let active: string | null = null;
+
   return {
     get discarded(): string | null {
       return discarded;
     },
 
+    get active(): string | null {
+      return active;
+    },
+
     save(session): void {
       if (session === null || session.turns.length === 0) return;
       if (discarded === session.slug) return;
+      if (active !== null && active !== session.slug) return;
       void options.save(session).catch(() => undefined);
     },
 
@@ -79,6 +101,10 @@ export function createSessionWriter(options: SessionWriterOptions): SessionWrite
 
     beginTurn(slug): void {
       if (discarded === slug) discarded = null;
+    },
+
+    setActive(slug): void {
+      active = slug;
     },
   };
 }

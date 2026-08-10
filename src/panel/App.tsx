@@ -28,6 +28,7 @@ import {
   type ProbeState,
 } from './components.tsx';
 import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
+import { classifyCapture } from './problem-switch.ts';
 import { createSessionWriter } from './session-writer.ts';
 import { createSettingsWriter } from './settings-writer.ts';
 import { IDLE_PROGRESS, TIMEOUT_AFTER_MS, applyEvent, beginTurn, type TurnProgress } from './turn-progress.ts';
@@ -167,6 +168,7 @@ export function App(): ReactNode {
       const result = await client.capture(tabId);
       if (result.snapshot) {
         setSnapshot(result.snapshot);
+        sessionWriter.setActive(result.snapshot.problem.slug);
         loadAttempts(result.snapshot.problem.slug);
         offerResume(result.snapshot.problem.slug);
       } else {
@@ -174,7 +176,7 @@ export function App(): ReactNode {
         setShowPaste(true);
       }
     })();
-  }, [client, loadAttempts, offerResume, settingsWriter]);
+  }, [client, loadAttempts, offerResume, sessionWriter, settingsWriter]);
 
   // ---- saving the session -------------------------------------------------
 
@@ -213,23 +215,116 @@ export function App(): ReactNode {
     return () => globalThis.removeEventListener('pagehide', onHide);
   }, [saveSession]);
 
-  /** Re-reads the page so the model always sees the current editor buffer. */
-  const freshSnapshot = useCallback(async (): Promise<PageSnapshot | null> => {
-    if (!snapshot) return null;
-    if (snapshot.problem.source === 'manual') return snapshot;
+  const captureLive = useCallback(async (): Promise<PageSnapshot | null> => {
     const tabId = await activeTabId();
-    if (tabId === null) return snapshot;
+    if (tabId === null) return null;
     try {
-      const result = await client.capture(tabId);
-      if (result.snapshot && result.snapshot.problem.slug === snapshot.problem.slug) {
-        setSnapshot(result.snapshot);
-        return result.snapshot;
-      }
+      return (await client.capture(tabId)).snapshot;
     } catch {
-      /* fall back to the snapshot we already have */
+      return null;
     }
-    return snapshot;
-  }, [client, snapshot]);
+  }, [client]);
+
+  /**
+   * Follow the page onto a different problem.
+   *
+   * The old session is closed and written under its own slug *before* the writer
+   * is told what is on screen now, because from that moment it refuses writes
+   * for anything else - which is what stops a turn that finishes mid-navigation
+   * from landing in the wrong session. Everything the panel holds then resets,
+   * rung included: see `problem-switch.ts` for why carrying the rung across a
+   * switch would give away hints nobody earned.
+   */
+  const adoptProblem = useCallback(
+    (next: PageSnapshot): void => {
+      // Whatever is streaming belongs to the problem being left.
+      cancelRef.current?.();
+
+      // Built explicitly rather than from state that is about to be reset.
+      if (snapshot !== null && turns.length > 0) {
+        sessionWriter.save({
+          slug: snapshot.problem.slug,
+          title: snapshot.problem.title,
+          startedAt: attemptStartedAt,
+          updatedAt: Date.now(),
+          elapsedMs: Date.now() - sessionStart,
+          rung,
+          deepestRung,
+          turns,
+        });
+      }
+      sessionWriter.setActive(next.problem.slug);
+
+      const startedAt = Date.now();
+      setSnapshot(next);
+      setTurns([]);
+      setRung(0);
+      setDeepestRung(0);
+      setStarted(false);
+      setStreaming(null);
+      setProgress(IDLE_PROGRESS);
+      setBusy(false);
+      setError(null);
+      setResumable(null);
+      setSessionStart(startedAt);
+      setAttemptStartedAt(nowIso(startedAt));
+      setNow(startedAt);
+
+      loadAttempts(next.problem.slug);
+      offerResume(next.problem.slug);
+    },
+    [attemptStartedAt, deepestRung, loadAttempts, offerResume, rung, sessionStart, sessionWriter, snapshot, turns],
+  );
+
+  /**
+   * Re-reads the page so the model always sees the current editor buffer.
+   * Returns `null` when this turn must not run - either there is nothing to work
+   * from, or the page has moved to a different problem and the panel has just
+   * followed it, which resets the ladder and is not a turn.
+   */
+  const snapshotForTurn = useCallback(async (): Promise<PageSnapshot | null> => {
+    const outcome = classifyCapture(snapshot, await captureLive());
+    switch (outcome.kind) {
+      case 'unchanged':
+        return snapshot;
+      case 'refreshed':
+        setSnapshot(outcome.snapshot);
+        return outcome.snapshot;
+      case 'switched':
+        adoptProblem(outcome.snapshot);
+        return null;
+    }
+  }, [adoptProblem, captureLive, snapshot]);
+
+  /*
+   * Notice the navigation when it happens rather than at the next click, so the
+   * panel is never visibly describing a problem the user has already left. The
+   * `active` check makes a repeat harmless: LeetCode is a single-page app and
+   * fires several updates per navigation, and React state has not caught up
+   * between them.
+   */
+  useEffect(() => {
+    const follow = (): void => {
+      void (async () => {
+        const outcome = classifyCapture(snapshot, await captureLive());
+        if (outcome.kind !== 'switched') return;
+        if (outcome.snapshot.problem.slug === sessionWriter.active) return;
+        adoptProblem(outcome.snapshot);
+      })();
+    };
+    const onUpdated = (tabId: number, change: chrome.tabs.OnUpdatedInfo): void => {
+      if (change.url === undefined && change.status !== 'complete') return;
+      void activeTabId().then((active) => {
+        if (active === tabId) follow();
+      });
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onActivated.addListener(follow);
+    return () => {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onActivated.removeListener(follow);
+    };
+  }, [adoptProblem, captureLive, sessionWriter, snapshot]);
 
   const persistAttempt = useCallback(
     (deepest: Rung, current: PageSnapshot) => {
@@ -284,9 +379,13 @@ export function App(): ReactNode {
 
   const ask = useCallback(
     async (intent: AskIntent, targetRung: Rung, message: string) => {
-      const current = await freshSnapshot();
+      const current = await snapshotForTurn();
       if (!current) {
-        setShowPaste(true);
+        // Either there is nothing to work from at all, or the page moved to a
+        // different problem and the panel has just followed it. A switch resets
+        // the ladder, so this click is not a turn - the user is now looking at a
+        // fresh problem and can start it deliberately.
+        if (snapshot === null) setShowPaste(true);
         return;
       }
 
@@ -347,18 +446,30 @@ export function App(): ReactNode {
         onDone: () => {
           const finalTurns = settle();
           persistAttempt(deepest, current);
-          saveSession({ turns: finalTurns, rung: targetRung, deepestRung: deepest });
+          saveSession({
+            slug: current.problem.slug,
+            title: current.problem.title,
+            turns: finalTurns,
+            rung: targetRung,
+            deepestRung: deepest,
+          });
         },
         onError: (failure) => {
           const finalTurns = settle();
           if (failure.code !== 'aborted') setError(failure);
           // A cancelled or failed turn still cost the user something; keeping the
           // partial reply is what makes resuming after one honest.
-          saveSession({ turns: finalTurns, rung: targetRung, deepestRung: deepest });
+          saveSession({
+            slug: current.problem.slug,
+            title: current.problem.title,
+            turns: finalTurns,
+            rung: targetRung,
+            deepestRung: deepest,
+          });
         },
       });
     },
-    [client, deepestRung, freshSnapshot, pace, persistAttempt, reducedMotion, saveSession, sessionStart, sessionWriter, stopPacing, turns],
+    [client, deepestRung, pace, persistAttempt, reducedMotion, saveSession, sessionStart, sessionWriter, snapshot, snapshotForTurn, stopPacing, turns],
   );
 
   /*
@@ -518,6 +629,7 @@ export function App(): ReactNode {
           reason={captureFailure}
           onSubmit={(pasted) => {
             setSnapshot(pasted);
+            sessionWriter.setActive(pasted.problem.slug);
             setShowPaste(false);
             setCaptureFailure(null);
             loadAttempts(pasted.problem.slug);
