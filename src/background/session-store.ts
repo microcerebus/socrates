@@ -5,7 +5,15 @@
  * `keychain.ts`.
  */
 
-import { DEFAULT_SETTINGS, MODEL_IDS, type AttemptRecord, type ModelId, type Settings } from '../shared/types.ts';
+import {
+  DEFAULT_SETTINGS,
+  MODEL_IDS,
+  PROVIDER_IDS,
+  type AttemptRecord,
+  type ModelId,
+  type ProviderId,
+  type Settings,
+} from '../shared/types.ts';
 
 const ATTEMPTS_KEY = 'socrates:attempts';
 const SETTINGS_KEY = 'socrates:settings';
@@ -46,18 +54,31 @@ function isModelId(value: unknown): value is ModelId {
   return typeof value === 'string' && (MODEL_IDS as readonly string[]).includes(value);
 }
 
+function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === 'string' && (PROVIDER_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * Each field falls back on its own. A settings blob written before the provider
+ * existed keeps its model and picks up the default provider, rather than being
+ * thrown away wholesale.
+ */
+function coerceSettings(value: unknown): Settings {
+  if (typeof value !== 'object' || value === null) return { ...DEFAULT_SETTINGS };
+  const record = value as { model?: unknown; provider?: unknown };
+  return {
+    provider: isProviderId(record.provider) ? record.provider : DEFAULT_SETTINGS.provider,
+    model: isModelId(record.model) ? record.model : DEFAULT_SETTINGS.model,
+  };
+}
+
 export async function getSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
-  const value = stored[SETTINGS_KEY];
-  if (typeof value === 'object' && value !== null) {
-    const model = (value as { model?: unknown }).model;
-    if (isModelId(model)) return { model };
-  }
-  return { ...DEFAULT_SETTINGS };
+  return coerceSettings(stored[SETTINGS_KEY]);
 }
 
 export async function setSettings(settings: Settings): Promise<Settings> {
-  const safe: Settings = { model: isModelId(settings.model) ? settings.model : DEFAULT_SETTINGS.model };
+  const safe = coerceSettings(settings);
   await chrome.storage.local.set({ [SETTINGS_KEY]: safe });
   return safe;
 }

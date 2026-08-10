@@ -1,0 +1,84 @@
+/**
+ * The two ways a reply can be produced, behind one function type.
+ *
+ * `interview.ts` owns everything that makes a reply correct - the gated system
+ * prompt, the message list, the spoiler guard - and knows nothing about where
+ * the tokens come from. A provider is only a transport: same system prompt, same
+ * messages, same `onText` contract. That is what makes the guard and the rung
+ * discipline provider-independent rather than duplicated per provider.
+ */
+
+import type { ModelId } from '../shared/types.ts';
+import { streamMessage, type ApiMessage } from './anthropic.ts';
+import { streamClaudeCode, type NativeConnect } from './claude-code.ts';
+
+export interface ProviderRequest {
+  model: ModelId;
+  system: string;
+  /** Oldest first. The last entry is always the current user turn. */
+  messages: ApiMessage[];
+  onText(text: string): void;
+  onThinking?(): void;
+  signal?: AbortSignal;
+}
+
+export type ProviderStream = (request: ProviderRequest) => Promise<void>;
+
+/** Streams from api.anthropic.com with a key read from the vault. */
+export function apiKeyProvider(options: { apiKey: string; fetchImpl?: typeof fetch }): ProviderStream {
+  return (request) =>
+    streamMessage({
+      apiKey: options.apiKey,
+      model: request.model,
+      system: request.system,
+      messages: request.messages,
+      onText: request.onText,
+      ...(request.onThinking ? { onThinking: request.onThinking } : {}),
+      ...(request.signal ? { signal: request.signal } : {}),
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    });
+}
+
+/**
+ * Renders the message list as one prompt.
+ *
+ * The Messages API takes a role-tagged array; the `claude` CLI in print mode
+ * takes a single prompt. `--input-format stream-json` looks like the missing
+ * piece but is not - feeding it a transcript re-runs the model once per user
+ * message rather than priming history, which would bill several turns and let
+ * the model answer an old question. Flattening keeps it to one call, and keeps
+ * the host stateless: the transcript is resent every time, nothing is resumed.
+ */
+export function flattenMessages(messages: ApiMessage[]): string {
+  const current = messages.at(-1);
+  if (current === undefined) return '';
+  const earlier = messages.slice(0, -1);
+  if (earlier.length === 0) return current.content;
+
+  const transcript = earlier
+    .map((message) => `## ${message.role === 'user' ? 'The candidate said' : 'You replied'}\n${message.content}`)
+    .join('\n\n');
+
+  return (
+    `# CONVERSATION SO FAR\n\n` +
+    `Earlier turns of this same interview, oldest first. Continue from here rather than starting over.\n\n` +
+    `${transcript}\n\n---\n\n${current.content}`
+  );
+}
+
+/**
+ * Streams from the local `claude` CLI through the native host, on whatever
+ * subscription that CLI is logged into.
+ */
+export function claudeCodeProvider(options: { connect?: NativeConnect } = {}): ProviderStream {
+  return (request) =>
+    streamClaudeCode({
+      model: request.model,
+      system: request.system,
+      prompt: flattenMessages(request.messages),
+      onText: request.onText,
+      ...(request.onThinking ? { onThinking: request.onThinking } : {}),
+      ...(request.signal ? { signal: request.signal } : {}),
+      ...(options.connect ? { connect: options.connect } : {}),
+    });
+}

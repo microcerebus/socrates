@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildRequestBody } from '../src/background/anthropic.ts';
 import { runInterviewTurn, toApiMessages } from '../src/background/interview.ts';
+import { apiKeyProvider } from '../src/background/providers.ts';
 import { buildUserTurn } from '../src/prompt/context.ts';
 import { RUNGS, TECHNIQUE_NAMES, TOTAL_HINTS } from '../src/prompt/rungs.ts';
 import { WITHHELD_NOTICE, redactCode } from '../src/prompt/spoiler-guard.ts';
@@ -148,6 +149,7 @@ describe('request body', () => {
 });
 
 describe('an interview turn end to end', () => {
+  const apiKey = 'sk-test';
   const codeReply = [
     'Track what you have seen.\n\n',
     '```javascript\nconst seen = new Map();\n',
@@ -158,11 +160,10 @@ describe('an interview turn end to end', () => {
   it('sends the gated system prompt and the direct-browser-access header', async () => {
     const mock = mockAnthropic(sseBody(['ok']));
     await runInterviewTurn({
-      apiKey: 'sk-test',
       model: 'claude-sonnet-5',
       request: askRequest({ rung: 1 }),
       onText: () => undefined,
-      fetchImpl: mock.impl,
+      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
     });
 
     const call = mock.calls[0]!;
@@ -180,13 +181,12 @@ describe('an interview turn end to end', () => {
     const mock = mockAnthropic(sseBody(codeReply));
     let output = '';
     await runInterviewTurn({
-      apiKey: 'sk-test',
       model: 'claude-sonnet-5',
       request: askRequest({ rung }),
       onText: (text) => {
         output += text;
       },
-      fetchImpl: mock.impl,
+      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
     });
 
     expect(output).not.toContain('new Map()');
@@ -200,13 +200,12 @@ describe('an interview turn end to end', () => {
     const mock = mockAnthropic(sseBody(codeReply));
     let output = '';
     await runInterviewTurn({
-      apiKey: 'sk-test',
       model: 'claude-opus-5',
       request: askRequest({ rung }),
       onText: (text) => {
         output += text;
       },
-      fetchImpl: mock.impl,
+      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
     });
 
     expect(output).toContain('const seen = new Map();');
@@ -217,12 +216,11 @@ describe('an interview turn end to end', () => {
     const mock = mockAnthropic(sseBody(['hello'], { withThinking: true }));
     const seen: string[] = [];
     await runInterviewTurn({
-      apiKey: 'sk-test',
       model: 'claude-sonnet-5',
       request: askRequest(),
       onThinking: () => seen.push('thinking'),
       onText: () => seen.push('text'),
-      fetchImpl: mock.impl,
+      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
     });
     expect(seen[0]).toBe('thinking');
   });
@@ -230,11 +228,10 @@ describe('an interview turn end to end', () => {
   it('surfaces an auth failure with something to do about it, and no hardcoded vault path', async () => {
     const mock = mockAnthropic(JSON.stringify({ error: { message: 'invalid x-api-key' } }), { status: 401 });
     const failure = await runInterviewTurn({
-      apiKey: 'sk-bad',
       model: 'claude-sonnet-5',
       request: askRequest(),
       onText: () => undefined,
-      fetchImpl: mock.impl,
+      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
     }).then(
       () => null,
       (error: AppError) => error,

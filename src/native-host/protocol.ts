@@ -2,11 +2,26 @@
  * Chrome native-messaging framing: a 4-byte native-endian length prefix followed
  * by that many bytes of UTF-8 JSON. Chrome refuses messages larger than 1 MB in
  * either direction.
+ *
+ * ## Two shapes over one host
+ *
+ * The key fetch is request/response and rides `chrome.runtime.sendNativeMessage`:
+ * one message in, one message out, host exits. Streaming a Claude Code reply
+ * cannot work that way, so it rides a `chrome.runtime.connectNative` port
+ * instead - the same framing and the same binary, but many frames come back for
+ * one request. Every streaming frame carries the `requestId` it belongs to, so a
+ * frame that outlives its request is discardable rather than confusing.
  */
 
 export const MAX_MESSAGE_BYTES = 1024 * 1024;
 
-export type HostRequest = { kind: 'ping' } | { kind: 'get-api-key' };
+export type HostRequest =
+  | { kind: 'ping' }
+  | { kind: 'get-api-key' }
+  /** Checks the `claude` CLI is present and logged in. The Claude Code analogue of a vault probe. */
+  | { kind: 'claude-probe' }
+  | { kind: 'claude-start'; requestId: string; model: string; system: string; prompt: string }
+  | { kind: 'claude-cancel'; requestId: string };
 
 export type HostFailureCode =
   | 'dcli-missing'
@@ -14,12 +29,20 @@ export type HostFailureCode =
   | 'vault-logged-out'
   | 'vault-item-missing'
   | 'key-fetch-failed'
+  | 'claude-cli-missing'
+  | 'claude-logged-out'
+  | 'claude-usage-limit'
+  | 'claude-cli-failed'
   | 'bad-request';
 
 export type HostResponse =
-  | { ok: true; kind: 'pong'; itemTitle: string }
+  | { ok: true; kind: 'pong'; itemTitle: string; claudePath: string | null }
   | { ok: true; kind: 'api-key'; apiKey: string }
-  | { ok: false; code: HostFailureCode; message: string; command?: string };
+  | { ok: true; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
+  | { ok: true; kind: 'claude-thinking'; requestId: string }
+  | { ok: true; kind: 'claude-delta'; requestId: string; text: string }
+  | { ok: true; kind: 'claude-done'; requestId: string }
+  | { ok: false; code: HostFailureCode; message: string; command?: string; requestId?: string };
 
 export function encodeMessage(message: unknown): Buffer {
   const json = Buffer.from(JSON.stringify(message), 'utf8');
@@ -54,8 +77,28 @@ export class MessageDecoder {
   }
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value !== '';
+}
+
 export function isHostRequest(value: unknown): value is HostRequest {
   if (typeof value !== 'object' || value === null) return false;
-  const kind = (value as { kind?: unknown }).kind;
-  return kind === 'ping' || kind === 'get-api-key';
+  const record = value as Record<string, unknown>;
+  switch (record['kind']) {
+    case 'ping':
+    case 'get-api-key':
+    case 'claude-probe':
+      return true;
+    case 'claude-start':
+      return (
+        isNonEmptyString(record['requestId']) &&
+        isNonEmptyString(record['model']) &&
+        typeof record['system'] === 'string' &&
+        typeof record['prompt'] === 'string'
+      );
+    case 'claude-cancel':
+      return isNonEmptyString(record['requestId']);
+    default:
+      return false;
+  }
 }

@@ -15,6 +15,18 @@ import { appError, type AppError, type AttemptRecord, type PageSnapshot, type Se
 
 type FrameHandler = (frame: WorkerFrame) => void;
 
+/** What the native host is configured with. Non-secret; shown in Settings. */
+export interface HostInfo {
+  itemTitle: string;
+  claudePath: string | null;
+}
+
+export interface ClaudeAccess {
+  claudePath: string;
+  account: string | null;
+  subscription: string | null;
+}
+
 export interface AskCallbacks {
   onDelta(text: string): void;
   onThinking(): void;
@@ -96,10 +108,11 @@ export class PortClient {
     );
   }
 
-  vaultItemTitle(): Promise<string> {
+  hostInfo(): Promise<HostInfo> {
     return this.#once(
-      (id) => ({ id, kind: 'vault-info' }),
-      (frame) => (frame.kind === 'vault-info' ? frame.itemTitle : undefined),
+      (id) => ({ id, kind: 'host-info' }),
+      (frame) =>
+        frame.kind === 'host-info' ? { itemTitle: frame.itemTitle, claudePath: frame.claudePath } : undefined,
     );
   }
 
@@ -107,6 +120,16 @@ export class PortClient {
     return this.#once(
       (id) => ({ id, kind: 'probe-key' }),
       (frame) => (frame.kind === 'key-ok' ? true : undefined),
+    );
+  }
+
+  probeClaude(): Promise<ClaudeAccess> {
+    return this.#once(
+      (id) => ({ id, kind: 'probe-claude' }),
+      (frame) =>
+        frame.kind === 'claude-ok'
+          ? { claudePath: frame.claudePath, account: frame.account, subscription: frame.subscription }
+          : undefined,
     );
   }
 

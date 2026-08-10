@@ -3,7 +3,8 @@
  *
  * Lives at `~/.config/socrates/native-host.json` and is written by
  * `bin/install-native-host.sh`. It contains *no* secrets - only where to find
- * `dcli` and which Dashlane item holds the key.
+ * the two binaries the host shells out to, and which Dashlane item holds the
+ * API key.
  */
 
 export interface HostConfig {
@@ -17,13 +18,33 @@ export interface HostConfig {
   itemTitle: string;
   /** Field on that item: `content` for a secure note, `password` for a credential. */
   itemField: string;
+  /**
+   * Absolute path to the Claude Code CLI, recorded by the installer for the same
+   * reason as `dcliPath`. It can go stale - `claude install` and Homebrew both
+   * move the binary - so the host also probes the well-known locations below
+   * before giving up, and says which ones it tried.
+   */
+  claudePath: string;
 }
 
 export const DEFAULT_CONFIG: HostConfig = {
   dcliPath: '/opt/homebrew/bin/dcli',
   itemTitle: 'Anthropic API Key',
   itemField: 'content',
+  claudePath: '/opt/homebrew/bin/claude',
 };
+
+/**
+ * Where `claude` ends up when the recorded path misses. Newest-first, same
+ * fallback-chain idea as the LeetCode selectors: `~/.local/bin` is where the
+ * native installer puts it, then Homebrew, then a manual /usr/local install.
+ */
+export const CLAUDE_FALLBACK_PATHS = ['.local/bin/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'];
+
+function readString(record: Record<string, unknown>, key: string, fallback: string): string {
+  const value = record[key];
+  return typeof value === 'string' && value !== '' ? value : fallback;
+}
 
 export function parseConfig(raw: string | null): HostConfig {
   if (!raw) return { ...DEFAULT_CONFIG };
@@ -36,15 +57,43 @@ export function parseConfig(raw: string | null): HostConfig {
   if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_CONFIG };
   const record = parsed as Record<string, unknown>;
   return {
-    dcliPath: typeof record['dcliPath'] === 'string' && record['dcliPath'] ? record['dcliPath'] : DEFAULT_CONFIG.dcliPath,
-    itemTitle:
-      typeof record['itemTitle'] === 'string' && record['itemTitle'] ? record['itemTitle'] : DEFAULT_CONFIG.itemTitle,
-    itemField:
-      typeof record['itemField'] === 'string' && record['itemField'] ? record['itemField'] : DEFAULT_CONFIG.itemField,
+    dcliPath: readString(record, 'dcliPath', DEFAULT_CONFIG.dcliPath),
+    itemTitle: readString(record, 'itemTitle', DEFAULT_CONFIG.itemTitle),
+    itemField: readString(record, 'itemField', DEFAULT_CONFIG.itemField),
+    claudePath: readString(record, 'claudePath', DEFAULT_CONFIG.claudePath),
   };
 }
 
 /** `dl://<title>/<field>` - the path form `dcli read` expects. */
 export function vaultPath(config: HostConfig): string {
   return `dl://${config.itemTitle}/${config.itemField}`;
+}
+
+export interface ClaudePathLookup {
+  /** The first candidate that exists, or `null` when none do. */
+  path: string | null;
+  /** Every candidate tried, in order. Quoted back to the user when none hit. */
+  tried: string[];
+}
+
+/**
+ * Resolves the `claude` binary: the recorded path first, then the well-known
+ * locations. Pure apart from the injected `exists`, so a moved binary is a test
+ * rather than a manual experiment.
+ */
+export function resolveClaudePath(
+  config: HostConfig,
+  exists: (path: string) => boolean,
+  home: string,
+): ClaudePathLookup {
+  const candidates: string[] = [];
+  const add = (candidate: string): void => {
+    const absolute = candidate.startsWith('/') ? candidate : `${home.replace(/\/$/, '')}/${candidate}`;
+    if (!candidates.includes(absolute)) candidates.push(absolute);
+  };
+
+  add(config.claudePath);
+  for (const fallback of CLAUDE_FALLBACK_PATHS) add(fallback);
+
+  return { path: candidates.find(exists) ?? null, tried: candidates };
 }

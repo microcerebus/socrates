@@ -36,11 +36,17 @@ function fails(stderr: string, exitCode = 1): CommandResult {
   return { exitCode, stdout: '', stderr };
 }
 
+const FAKE_HOME = '/home/tester';
+
 function deps(responses: Record<string, CommandResult>, config = DEFAULT_CONFIG): HostDeps & { calls: string[][] } {
   const calls: string[][] = [];
   return {
     calls,
     config,
+    home: FAKE_HOME,
+    // The dcli branches never look for `claude`; the Claude Code suite injects
+    // its own predicate.
+    exists: () => true,
     run: (command, args) => {
       calls.push([command, ...args]);
       const key = args[0] ?? '';
@@ -106,6 +112,7 @@ describe('config', () => {
     const config = parseConfig(JSON.stringify({ itemTitle: 'Work Anthropic key', dcliPath: '' }));
     expect(config.itemTitle).toBe('Work Anthropic key');
     expect(config.dcliPath).toBe(DEFAULT_CONFIG.dcliPath);
+    expect(config.claudePath).toBe(DEFAULT_CONFIG.claudePath);
     expect(vaultPath(config)).toBe('dl://Work Anthropic key/content');
   });
 
@@ -164,6 +171,7 @@ describe('key lookup', () => {
       ok: true,
       kind: 'pong',
       itemTitle: DEFAULT_CONFIG.itemTitle,
+      claudePath: DEFAULT_CONFIG.claudePath,
     });
     expect(d.calls).toEqual([]);
   });

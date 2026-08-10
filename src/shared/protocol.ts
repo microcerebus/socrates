@@ -14,6 +14,7 @@ import type {
   ModelId,
   PageSnapshot,
   ProblemContext,
+  ProviderId,
   Rung,
   Settings,
   Turn,
@@ -44,7 +45,8 @@ export type PanelRequest =
   | { id: number; kind: 'get-attempts'; slug: string }
   | { id: number; kind: 'record-attempt'; attempt: AttemptRecord }
   | { id: number; kind: 'probe-key' }
-  | { id: number; kind: 'vault-info' };
+  | { id: number; kind: 'probe-claude' }
+  | { id: number; kind: 'host-info' };
 
 export type WorkerFrame =
   | { id: number; kind: 'capture-result'; snapshot: PageSnapshot | null; failure?: string }
@@ -54,7 +56,8 @@ export type WorkerFrame =
   | { id: number; kind: 'settings'; settings: Settings }
   | { id: number; kind: 'attempts'; attempts: AttemptRecord[] }
   | { id: number; kind: 'key-ok' }
-  | { id: number; kind: 'vault-info'; itemTitle: string }
+  | { id: number; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
+  | { id: number; kind: 'host-info'; itemTitle: string; claudePath: string | null }
   | { id: number; kind: 'ack' }
   | { id: number; kind: 'error'; error: AppError };
 
@@ -90,5 +93,6 @@ export interface PageBridgeResponse {
 }
 
 export interface StoredSettings {
+  provider: ProviderId;
   model: ModelId;
 }
