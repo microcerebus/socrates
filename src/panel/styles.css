@@ -13,46 +13,75 @@
  * hex value outside these two blocks, add a token instead - a literal will be
  * right in one scheme and wrong in the other.
  */
+
+/* JetBrains Mono, bundled locally (OFL) in public/fonts/ - the extension CSP
+ * forbids remote font loading, so there is no @import from a font host. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-600-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+}
+/* Catppuccin Mocha (https://catppuccin.com/palette) - Base/Surface0/Crust for
+ * layering, Text/Subtext0 for typography, Blue for the primary accent. */
 :root {
-  --bg: #131316;
-  --surface: #1b1b1f;
-  --surface-sunk: #0f0f12;
-  --border: #2c2c33;
-  --text: #e8e6e3;
-  --text-muted: #a09b94;
-  --accent: #8fa2e8;
-  --accent-soft: #23273a;
+  --bg: #1e1e2e;
+  --surface: #313244;
+  --surface-sunk: #11111b;
+  --border: #45475a;
+  --text: #cdd6f4;
+  --text-muted: #a6adc8;
+  --accent: #89b4fa;
+  --accent-soft: rgb(137 180 250 / 16%);
   /* Text drawn on top of a filled --accent surface. */
-  --on-accent: #14141a;
-  --warn-bg: #2a2418;
-  --warn-border: #4d3f20;
-  --error-bg: #2e1e1c;
-  --error-border: #61352d;
-  --easy: #63c79a;
-  --medium: #dcae61;
-  --hard: #e6908a;
+  --on-accent: #1e1e2e;
+  --warn-bg: rgb(249 226 175 / 14%);
+  --warn-border: rgb(249 226 175 / 40%);
+  --error-bg: rgb(243 139 168 / 14%);
+  --error-border: rgb(243 139 168 / 40%);
+  --easy: #a6e3a1;
+  --medium: #f9e2af;
+  --hard: #f38ba8;
   --radius: 8px;
   color-scheme: dark light;
 }
 
+/* Catppuccin Latte, the light counterpart with the same semantic mapping. */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #fbfaf8;
-    --surface: #ffffff;
-    --surface-sunk: #f2f0ec;
-    --border: #e0dcd5;
-    --text: #23211e;
-    --text-muted: #6b665e;
-    --accent: #4a5891;
-    --accent-soft: #ebeef7;
-    --on-accent: #ffffff;
-    --warn-bg: #fdf5e6;
-    --warn-border: #e6d3a8;
-    --error-bg: #fdf0ee;
-    --error-border: #e8c4bc;
-    --easy: #1f7a55;
-    --medium: #8a5f16;
-    --hard: #9c3a33;
+    --bg: #eff1f5;
+    --surface: #ccd0da;
+    --surface-sunk: #dce0e8;
+    --border: #bcc0cc;
+    --text: #4c4f69;
+    --text-muted: #6c6f85;
+    --accent: #1e66f5;
+    --accent-soft: rgb(30 102 245 / 10%);
+    --on-accent: #eff1f5;
+    --warn-bg: rgb(223 142 29 / 12%);
+    --warn-border: rgb(223 142 29 / 35%);
+    --error-bg: rgb(210 15 57 / 10%);
+    --error-border: rgb(210 15 57 / 30%);
+    --easy: #40a02b;
+    --medium: #df8e1d;
+    --hard: #d20f39;
     color-scheme: light dark;
   }
 }
@@ -71,7 +100,7 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -118,7 +147,7 @@ body {
 
 .mono {
   font-variant-numeric: tabular-nums;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .pill {
@@ -249,7 +278,7 @@ body {
 }
 
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
   background: var(--surface-sunk);
   border-radius: 4px;

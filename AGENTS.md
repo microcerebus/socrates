@@ -27,7 +27,8 @@ The notes below are the things that are not obvious from reading the code.
 - All LeetCode selectors live in `src/content/scrape/selectors.ts` as fallback chains. DOM drift should be a one-file change, and when it is not, the paste fallback keeps the tool usable.
 - **No dcli prose on the success path.** `dcli` has no machine-readable output, so `src/native-host/handler.ts` reads first and only runs `dcli status` to classify a failure. When status stops being parseable the host must return a generic `key-fetch-failed` quoting dcli's own stderr - never a confident guess. `tests/dcli-contract.test.ts` (skipped without dcli) is what turns future wording drift into a red test.
 - **No vault paths in extension code.** The Dashlane item is configurable in the host config; the panel learns it via the host `ping` and shows it in Settings. Error messages must not name a `dl://` path.
-- **Dark is the primary scheme** in `src/panel/styles.css`, light is the `prefers-color-scheme: light` override. Every colour is a token declared in one of those two blocks; a literal outside them will be wrong in one scheme. Check both after any UI change.
+- **Dark is the primary scheme** in `src/panel/styles.css`, light is the `prefers-color-scheme: light` override. Every colour is a token declared in one of those two blocks; a literal outside them will be wrong in one scheme. Check both after any UI change. The tokens follow Catppuccin (Mocha for dark, Latte for light, https://catppuccin.com/palette) with a consistent semantic mapping - keep new tokens on-palette.
+- **Fonts are bundled locally** under `public/fonts/` (JetBrains Mono, OFL-licensed) and loaded via `@font-face` in `styles.css`. The extension CSP forbids remote font loading, so there is no `@import` from a font host; adding a typeface means vendoring its woff2 files the same way.
 
 ## Maintaining this file
 
