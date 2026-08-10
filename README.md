@@ -40,6 +40,19 @@ It only enforces the one rule that is unambiguous enough to enforce mechanically
 
 Both layers are covered by `tests/prompt-gating.test.ts`, which asserts on the request payload sent to a mocked Anthropic API and on what comes back out of the guard.
 
+## Where the replies come from
+
+Two providers, chosen in Settings. They differ only in transport: the same rung-gated system prompt goes out, the same spoiler guard runs over what comes back, and switching takes effect on your next message.
+
+| Provider | What it uses | What it costs |
+| --- | --- | --- |
+| **Claude Code (Max plan)** — default | The local `claude` CLI you are already logged into, run headlessly by the native host | Nothing beyond a logged-in CLI. **Shares your Claude usage windows** — see below |
+| Anthropic API key (Dashlane) | `api.anthropic.com`, with a key read from your vault at session start | Prepaid API credits on your console account |
+
+**The quota caveat, stated plainly.** On the Claude Code provider, a hint session is not free of your subscription — it draws on the same five-hour and weekly usage windows as every other Claude Code session on the machine. It is one pool. Interview turns are small (a few thousand tokens of problem, code and transcript), so a practice session costs far less than an hour of coding, but a long session while you are also mid-refactor elsewhere will bring the shared window down faster. When the window is exhausted the panel says so and repeats the CLI's own message about when it resets, rather than failing quietly.
+
+Setup for Claude Code mode is a logged-in CLI and nothing else: no key, no vault, no console account. `claude auth status` should report `"loggedIn": true`.
+
 ## Architecture
 
 ```
@@ -52,24 +65,38 @@ content-script.js  (ISOLATED world)
   parses the description  ─┴─────────▶ service-worker.js
                             sendMessage   builds the gated prompt  ────▶ POST /v1/messages
                                           runs the spoiler guard   ◀──── SSE stream
-                                              │  ▲
+                                              │  ▲                       (provider: API key)
                                        port   │  │  deltas
                                               ▼  │
                                           panel.html (React)
                                               │
                           native messaging     │
-  Dashlane vault ◀── dcli ◀── socrates-host ◀──┘  (API key, once per worker lifetime)
+  Dashlane vault ◀── dcli ◀── socrates-host ◀──┤  sendNativeMessage (API key, once per worker)
+                                              │
+  Claude Max  ◀── claude -p ◀── socrates-host ◀┘  connectNative port, one per turn
+                                                  (provider: Claude Code)
 ```
+
+The key fetch is one message in, one message out, so it rides `sendNativeMessage`. A model reply cannot: it arrives as hundreds of small frames over tens of seconds, and `sendNativeMessage` gives you exactly one. So the Claude Code provider opens a `connectNative` port instead, one per turn — a port that dies with its request needs no routing, reconnection or staleness rules, and disconnecting is itself the hardest cancellation available.
 
 | Path | Role |
 | --- | --- |
 | `src/prompt/` | Rung definitions, the system prompt, the context turn, the spoiler guard |
-| `src/background/` | Service worker: page capture, the Anthropic client, the key fetch, the session log |
+| `src/background/` | Service worker: page capture, both providers, the key fetch, the session log |
+| `src/background/providers.ts` | The two transports behind one function type |
 | `src/content/` | Isolated-world scraper plus the MAIN-world Monaco bridge |
 | `src/content/scrape/selectors.ts` | Every LeetCode DOM selector, in one file, as fallback chains |
 | `src/panel/` | The React side panel |
-| `src/native-host/` | The Chrome native messaging host that runs `dcli` |
+| `src/native-host/` | The native messaging host: runs `dcli` for the key, and `claude` for a reply |
 | `src/shared/` | Types and the panel/worker wire protocol |
+
+### Running the Claude Code CLI
+
+`src/native-host/claude.ts` carries the flags and why each one is there; the short version is that the interviewer prompt is passed as `--system-prompt`, which *replaces* Claude Code's own system prompt rather than appending to it, and `--tools ""` leaves the session with no tools at all. So the run is single-turn text generation with the rung rules as the only instruction in force — it cannot read files, run commands, or loop. `--safe-mode`, `--setting-sources ""`, `--strict-mcp-config` and `--disable-slash-commands` keep the machine's own CLAUDE.md files, hooks, MCP servers and skills out of an interview, and the child runs in a temp directory so there is nothing to discover anyway.
+
+Multi-turn is stateless: the transcript is flattened into one prompt and resent every call, and nothing is resumed. `--input-format stream-json` looks like the way to replay a message array but is not — it re-runs the model once per user message rather than priming history.
+
+`tests/claude-cli-contract.test.ts` pins the flags and the `claude auth status --json` shape against the installed CLI, at no token cost, so a rename fails `pnpm check` here instead of surfacing later as a blank panel.
 
 ### Reading the editor
 
@@ -87,10 +114,10 @@ If none of the chains hit, the panel says so and offers a paste box for the prob
 ## Requirements
 
 - macOS (the installer supports Linux too; it is only tested on macOS)
-- Chrome 116 or newer
+- Chrome 116 or newer, or Brave
 - Node 20+ and pnpm
-- [Dashlane CLI](https://github.com/Dashlane/dashlane-cli) (`brew install dashlane/tap/dashlane-cli`), logged in
-- An Anthropic API key stored in your Dashlane vault
+- For the default **Claude Code** provider: the [Claude Code CLI](https://claude.com/claude-code), logged in (`claude auth login`)
+- For the **API key** provider only: the [Dashlane CLI](https://github.com/Dashlane/dashlane-cli) (`brew install dashlane/tap/dashlane-cli`), logged in, with an Anthropic API key in your vault
 
 ## Setup
 
@@ -103,30 +130,19 @@ pnpm build
 
 `dist/` is the unpacked extension.
 
-### 2. Load it in Chrome
+### 2. Load it in the browser
 
-1. Open `chrome://extensions`.
+1. Open `chrome://extensions` (or `brave://extensions`).
 2. Turn on **Developer mode**.
-3. Click **Load unpacked** and choose the `dist/` folder.
+3. Click **Load unpacked** and choose the `dist` folder.
 
-The manifest pins a public key, so the extension id is always `lbhnejceegeplldfheefbalbfnhdafnb` no matter where `dist/` lives.
+The manifest pins a public key, so the extension id is stable no matter where `dist/` lives.
 That is what keeps the native messaging registration valid when you move or rebuild the folder.
+Chrome and Brave have each been seen to hand this build a different id, and the installer registers both.
 
 Note that Chrome 151 ignores the `--load-extension` command-line switch, so this has to be the manual **Load unpacked** step.
 
-### 3. Put the key in Dashlane
-
-Create a secure note in your vault titled **Anthropic API Key** whose content is the key and nothing else.
-Check it reads back cleanly:
-
-```sh
-dcli read "dl://Anthropic API Key/content"
-```
-
-A different item works fine.
-The item name and field are configuration, not code: see `~/.config/socrates/native-host.json` below.
-
-### 4. Register the native host
+### 3. Register the native host
 
 ```sh
 ./bin/install-native-host.sh
@@ -134,21 +150,36 @@ The item name and field are configuration, not code: see `~/.config/socrates/nat
 
 This writes two files, neither of which contains a secret:
 
-- the Chrome native messaging manifest, in each installed Chrome profile directory, pointing at a launcher in `dist/native-host/`
-- `~/.config/socrates/native-host.json`, holding the absolute path to `dcli` and which vault item to read
+- the native messaging manifest, in each installed Chrome and Brave profile directory, pointing at a launcher in `dist/native-host/`
+- `~/.config/socrates/native-host.json`, holding the absolute paths to `claude` and `dcli`, and which vault item to read
 
 ```json
 {
   "dcliPath": "/opt/homebrew/bin/dcli",
   "itemTitle": "Anthropic API Key",
-  "itemField": "content"
+  "itemField": "content",
+  "claudePath": "/opt/homebrew/bin/claude"
 }
 ```
 
-Edit `itemTitle` to point at a different item, and `itemField` to `password` if you keep the key in a credential rather than a secure note.
-Re-run the installer after installing `dcli` somewhere new, or with `SOCRATES_ITEM_TITLE="..." SOCRATES_FORCE_CONFIG=1` to rewrite the config.
+Both paths are recorded rather than looked up because the browser starts native hosts with a minimal `PATH` that will not find a Homebrew, nvm or `~/.local/bin` install; the launcher hard-codes the absolute path to `node` for the same reason.
+`claudePath` can go stale — `claude install` and Homebrew both move the binary — so the host also probes `~/.local/bin`, Homebrew and `/usr/local/bin` before giving up, and when it does give up it names every path it tried.
 
-The launcher hard-codes the absolute path to `node` on purpose: Chrome starts native hosts with a minimal `PATH` that will not find a Homebrew or nvm install.
+Re-running the installer merges rather than clobbers: any extension id already in an installed manifest is kept, so registering Chrome does not deregister Brave.
+Re-run it after installing `claude` or `dcli` somewhere new, or with `SOCRATES_ITEM_TITLE="..." SOCRATES_FORCE_CONFIG=1` to rewrite the config.
+
+### 4. If you want the API key provider
+
+Skip this on the default Claude Code provider — it needs no key at all.
+
+Create a secure note in your vault titled **Anthropic API Key** whose content is the key and nothing else, then check it reads back cleanly:
+
+```sh
+dcli read "dl://Anthropic API Key/content"
+```
+
+A different item works fine.
+The item name and field are configuration, not code: edit `itemTitle` above, and `itemField` to `password` if you keep the key in a credential rather than a secure note.
 
 ### 5. Use it
 
@@ -159,18 +190,22 @@ The panel opens next to the problem with the title, a session timer, your rung, 
 
 Open the gear in the panel header.
 
+**Where replies come from** is the provider switch described above, with each option's cost stated under it.
+It takes effect on your next message, with no reload, because the worker reads settings per turn rather than caching them.
+
 | Model | When |
 | --- | --- |
 | `claude-sonnet-5` | Default. Balanced. |
 | `claude-opus-5` | Deepest reasoning, slower. |
 | `claude-haiku-4-5-20251001` | Fastest and cheapest. |
 
-Requests use adaptive thinking at medium effort on the Claude 5 models.
-Haiku 4.5 predates both parameters and rejects them, so they are omitted for it (`src/background/anthropic.ts`).
-Replies stream token by token; while the model is thinking, the panel says so rather than sitting blank.
+The same three ids work on both providers: the CLI accepts full model ids, so the picker maps straight through.
+On the API-key provider, requests use adaptive thinking at medium effort on the Claude 5 models; Haiku 4.5 predates both parameters and rejects them, so they are omitted for it (`src/background/anthropic.ts`).
+Replies stream token by token on both providers, and the panel says it is thinking rather than sitting blank until the first token lands.
 
-**Test vault access** in the settings sheet runs the key fetch on its own, so you can check the Dashlane path without starting a session.
-The sheet also shows which Dashlane item the native host is configured to read, so nothing in the extension has to hardcode a vault path.
+The access section below the pickers follows the selected provider.
+**Test Claude Code access** reports the resolved binary and which account the CLI is logged in as; **Test vault access** runs the key fetch on its own and names the Dashlane item the host is configured to read.
+Either way the panel learns the path from the host rather than hardcoding one.
 
 ## Appearance
 
@@ -182,6 +217,7 @@ Both schemes were checked visually before shipping, including chat bubbles, ladd
 ## How the API key is handled
 
 This is the one hard rule in the project.
+It applies to the API-key provider; on Claude Code there is no key involved at all, and the vault is never opened.
 
 - The key is never written to `chrome.storage`, `localStorage`, IndexedDB, or any file the extension controls.
 - It is read from your Dashlane vault at session start, over Chrome native messaging, and cached **in service-worker memory only**.
@@ -226,9 +262,13 @@ The native host is a sixth artefact built for Node.
 | `tests/prompt-gating.test.ts` | Rung gating in the prompt, the request body, and code redaction end to end against a mocked Anthropic API |
 | `tests/scraper.test.ts` | The scraper against saved LeetCode HTML: current layout, a drifted layout, and an unrecognisable one |
 | `tests/native-host.test.ts` | Native messaging framing, config parsing, status parsing, and every vault failure branch against a fake `dcli` |
+| `tests/claude-host.test.ts` | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
+| `tests/claude-code.test.ts` | The extension half: the streaming port, cancellation, error mapping, transcript flattening, the settings switch, and that both providers redact identically |
 | `tests/dcli-contract.test.ts` | That the real `dcli status` still emits the lines the classifier reads. Skipped when `dcli` is not installed |
+| `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed |
 
 The problem bodies in `tests/fixtures/` are the real ones from LeetCode's public GraphQL endpoint; the page markup around them mirrors the live description tab.
+`tests/fixtures/fake-claude.mjs` is a stand-in for the CLI whose frames are copied from real `--output-format stream-json` runs, so the streaming tests spawn a real child process without spending a usage window.
 
 ### Changing the prompt
 

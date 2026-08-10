@@ -9,14 +9,22 @@ import {
   type AttemptRecord,
   type ModelId,
   type PageSnapshot,
+  type ProviderId,
   type Rung,
   type Settings,
   type Turn,
 } from '../shared/types.ts';
-import { Composer, ErrorNotice, Header, Ladder, PasteForm, SettingsPanel, Transcript } from './components.tsx';
-import { PortClient } from './port-client.ts';
-
-type KeyState = 'unknown' | 'checking' | 'ok' | 'failed';
+import {
+  Composer,
+  ErrorNotice,
+  Header,
+  Ladder,
+  PasteForm,
+  SettingsPanel,
+  Transcript,
+  type ProbeState,
+} from './components.tsx';
+import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
 
 /**
  * The panel document is created fresh each time the side panel opens, so module
@@ -47,8 +55,10 @@ export function App(): ReactNode {
 
   const [error, setError] = useState<AppError | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [keyState, setKeyState] = useState<KeyState>('unknown');
-  const [vaultItemTitle, setVaultItemTitle] = useState<string | null>(null);
+  const [keyState, setKeyState] = useState<ProbeState>('unknown');
+  const [claudeState, setClaudeState] = useState<ProbeState>('unknown');
+  const [claudeAccess, setClaudeAccess] = useState<ClaudeAccess | null>(null);
+  const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
   const [elapsedMs, setElapsedMs] = useState(0);
 
@@ -188,23 +198,26 @@ export function App(): ReactNode {
 
   const nextRung = (): Rung => (started ? (Math.min(rung + 1, 5) as Rung) : 0);
 
-  const onSelectModel = (model: ModelId): void => {
+  const saveSettings = (next: Settings): void => {
     void client
-      .setSettings({ model })
+      .setSettings(next)
       .then(setSettings)
       .catch((failure: AppError) => setError(failure));
   };
 
+  const onSelectModel = (model: ModelId): void => saveSettings({ ...settings, model });
+  const onSelectProvider = (provider: ProviderId): void => saveSettings({ ...settings, provider });
+
   // Loaded when Settings opens, so the panel can name the configured Dashlane
-  // item instead of the extension hardcoding a vault path anywhere.
+  // item and the resolved claude binary instead of hardcoding either.
   const openSettings = (): void => {
     const opening = !showSettings;
     setShowSettings(opening);
-    if (opening && vaultItemTitle === null) {
+    if (opening && hostInfo === null) {
       void client
-        .vaultItemTitle()
-        .then(setVaultItemTitle)
-        .catch(() => setVaultItemTitle('unknown (the native helper did not answer)'));
+        .hostInfo()
+        .then(setHostInfo)
+        .catch(() => setHostInfo({ itemTitle: 'unknown (the native helper did not answer)', claudePath: null }));
     }
   };
 
@@ -215,6 +228,20 @@ export function App(): ReactNode {
       .then(() => setKeyState('ok'))
       .catch((failure: AppError) => {
         setKeyState('failed');
+        setError(failure);
+      });
+  };
+
+  const onProbeClaude = (): void => {
+    setClaudeState('checking');
+    client
+      .probeClaude()
+      .then((access) => {
+        setClaudeAccess(access);
+        setClaudeState('ok');
+      })
+      .catch((failure: AppError) => {
+        setClaudeState('failed');
         setError(failure);
       });
   };
@@ -242,18 +269,27 @@ export function App(): ReactNode {
         </p>
       ) : null}
 
+      {/*
+        A sheet takes over the column rather than sitting on top of the
+        transcript. Settings is taller than it was once the provider choice and
+        its caveats are on it, and half a sheet with the transcript bleeding out
+        from under it reads as a rendering bug rather than a layer.
+      */}
       {showSettings ? (
         <SettingsPanel
+          provider={settings.provider}
           model={settings.model}
           keyState={keyState}
-          vaultItemTitle={vaultItemTitle}
+          claudeState={claudeState}
+          claudeAccess={claudeAccess}
+          hostInfo={hostInfo}
+          onSelectProvider={onSelectProvider}
           onSelectModel={onSelectModel}
           onProbeKey={onProbeKey}
+          onProbeClaude={onProbeClaude}
           onClose={() => setShowSettings(false)}
         />
-      ) : null}
-
-      {showPaste ? (
+      ) : showPaste ? (
         <PasteForm
           reason={captureFailure}
           onSubmit={(pasted) => {

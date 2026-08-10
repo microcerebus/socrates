@@ -14,9 +14,10 @@ import {
   type PanelRequest,
   type WorkerFrameBody,
 } from '../shared/protocol.ts';
-import { appError, type AppError, type PageSnapshot } from '../shared/types.ts';
+import { appError, type AppError, type PageSnapshot, type Settings } from '../shared/types.ts';
 import { runInterviewTurn } from './interview.ts';
-import { getApiKey, getVaultItemTitle } from './keychain.ts';
+import { getApiKey, getHostInfo, probeClaudeAccess } from './keychain.ts';
+import { apiKeyProvider, claudeCodeProvider, type ProviderStream } from './providers.ts';
 import { getAttempts, getSettings, recordAttempt, setSettings } from './session-store.ts';
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -65,15 +66,27 @@ async function capture(tabId: number): Promise<{ snapshot: PageSnapshot | null; 
   };
 }
 
+/**
+ * Settings are read per ask rather than cached, so switching provider or model
+ * takes effect on the very next message with no reload.
+ *
+ * The key fetch only happens on the API-key provider - on Claude Code the vault
+ * is never touched, which is the point of it.
+ */
+async function providerFor(settings: Settings): Promise<ProviderStream> {
+  if (settings.provider === 'claude-code') return claudeCodeProvider();
+  return apiKeyProvider({ apiKey: await getApiKey() });
+}
+
 async function runAsk(
   request: AskRequest,
   emit: (frame: WorkerFrameBody) => void,
   signal: AbortSignal,
 ): Promise<void> {
-  const [apiKey, settings] = await Promise.all([getApiKey(), getSettings()]);
+  const settings = await getSettings();
   await runInterviewTurn({
-    apiKey,
     model: settings.model,
+    stream: await providerFor(settings),
     request,
     signal,
     onThinking: () => emit({ kind: 'thinking' }),
@@ -154,9 +167,15 @@ chrome.runtime.onConnect.addListener((port) => {
           .catch(fail);
         break;
 
-      case 'vault-info':
-        void getVaultItemTitle()
-          .then((itemTitle) => send({ kind: 'vault-info', itemTitle }))
+      case 'probe-claude':
+        void probeClaudeAccess()
+          .then((access) => send({ kind: 'claude-ok', ...access }))
+          .catch(fail);
+        break;
+
+      case 'host-info':
+        void getHostInfo()
+          .then((info) => send({ kind: 'host-info', ...info }))
           .catch(fail);
         break;
     }

@@ -3,16 +3,19 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { RUNGS, TOTAL_HINTS, hintsUsedFor, rungSpec } from '../prompt/rungs.ts';
 import {
   MODEL_CHOICES,
+  PROVIDER_CHOICES,
   type AppError,
   type AttemptRecord,
   type EditorContext,
   type ModelId,
   type PageSnapshot,
   type ProblemContext,
+  type ProviderId,
   type Rung,
   type Turn,
 } from '../shared/types.ts';
 import { Markdown } from './markdown.tsx';
+import type { ClaudeAccess, HostInfo } from './port-client.ts';
 
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -103,6 +106,14 @@ export function Transcript({
     bottom.current?.scrollIntoView({ block: 'end' });
   }, [turns.length, streaming, thinking]);
 
+  /*
+   * A turn starts with `streaming` set to the empty string, so between the
+   * request going out and the first token arriving there is nothing to render.
+   * Say so rather than showing an empty bubble - on Claude Code that gap is a
+   * couple of seconds of process startup, and a blank bubble reads as broken.
+   */
+  const awaitingFirstToken = streaming === '' || (thinking && streaming === null);
+
   return (
     <div className="transcript">
       {turns.length === 0 && streaming === null && !thinking ? (
@@ -132,8 +143,8 @@ export function Transcript({
         </article>
       ))}
 
-      {thinking && streaming === null ? <p className="thinking">thinking…</p> : null}
-      {streaming !== null ? (
+      {awaitingFirstToken ? <p className="thinking">thinking…</p> : null}
+      {streaming !== null && streaming !== '' ? (
         <article className="turn turn-assistant streaming">
           <div className="body">
             <Markdown source={streaming} />
@@ -238,20 +249,119 @@ export function Composer({
   );
 }
 
+export type ProbeState = 'unknown' | 'checking' | 'ok' | 'failed';
+
+/**
+ * The Claude Code half of Settings.
+ *
+ * The quota caveat is rendered from `PROVIDER_CHOICES`, not written twice: it is
+ * the one thing about this provider a user can be genuinely surprised by, so it
+ * sits under the choice whether or not the choice is selected.
+ */
+function ClaudeCodeAccess({
+  state,
+  access,
+  claudePath,
+  onProbe,
+}: {
+  state: ProbeState;
+  access: ClaudeAccess | null;
+  claudePath: string | null;
+  onProbe: () => void;
+}): ReactNode {
+  return (
+    <>
+      <h3>Claude Code access</h3>
+      <p className="small">
+        Nothing to set up beyond a logged-in CLI. Socrates runs <code>claude</code> through the same native helper
+        it uses for the vault, with tools switched off and the interviewer prompt as the entire system prompt.
+      </p>
+      <p className="small">
+        Binary:{' '}
+        {access ? (
+          <code>{access.claudePath}</code>
+        ) : claudePath === null ? (
+          <em>not found</em>
+        ) : (
+          <code>{claudePath}</code>
+        )}
+        {access?.account ? (
+          <>
+            <br />
+            Signed in as <code>{access.account}</code>
+            {access.subscription ? ` on the ${access.subscription} plan` : ''}.
+          </>
+        ) : null}
+      </p>
+      <div className="ladder-row">
+        <button type="button" onClick={onProbe} disabled={state === 'checking'}>
+          {state === 'checking' ? 'Checking…' : 'Test Claude Code access'}
+        </button>
+        <span className="small">
+          {state === 'ok' ? 'Logged in.' : state === 'failed' ? 'See the message above.' : ''}
+        </span>
+      </div>
+    </>
+  );
+}
+
+function VaultAccess({
+  state,
+  vaultItemTitle,
+  onProbe,
+}: {
+  state: ProbeState;
+  vaultItemTitle: string | null;
+  onProbe: () => void;
+}): ReactNode {
+  return (
+    <>
+      <h3>API key</h3>
+      <p className="small">
+        Read from your Dashlane vault at session start through a native helper, and held in the service worker&rsquo;s
+        memory only. It is never written to extension storage or to disk.
+      </p>
+      <p className="small">
+        Dashlane item: {vaultItemTitle === null ? <em>checking&hellip;</em> : <code>{vaultItemTitle}</code>}
+        <br />
+        Change it in <code>~/.config/socrates/native-host.json</code>.
+      </p>
+      <div className="ladder-row">
+        <button type="button" onClick={onProbe} disabled={state === 'checking'}>
+          {state === 'checking' ? 'Checking…' : 'Test vault access'}
+        </button>
+        <span className="small">
+          {state === 'ok' ? 'Key loaded.' : state === 'failed' ? 'See the message above.' : ''}
+        </span>
+      </div>
+    </>
+  );
+}
+
 export function SettingsPanel({
+  provider,
   model,
   keyState,
-  vaultItemTitle,
+  claudeState,
+  claudeAccess,
+  hostInfo,
+  onSelectProvider,
   onSelectModel,
   onProbeKey,
+  onProbeClaude,
   onClose,
 }: {
+  provider: ProviderId;
   model: ModelId;
-  keyState: 'unknown' | 'checking' | 'ok' | 'failed';
-  /** Which Dashlane item the native host reads, or null while unknown. */
-  vaultItemTitle: string | null;
+  keyState: ProbeState;
+  claudeState: ProbeState;
+  claudeAccess: ClaudeAccess | null;
+  /** What the native host is configured with, or null while unknown. */
+  hostInfo: HostInfo | null;
+  onSelectProvider: (provider: ProviderId) => void;
   onSelectModel: (model: ModelId) => void;
   onProbeKey: () => void;
+  onProbeClaude: () => void;
   onClose: () => void;
 }): ReactNode {
   return (
@@ -262,6 +372,25 @@ export function SettingsPanel({
           close
         </button>
       </div>
+
+      <h3>Where replies come from</h3>
+      {PROVIDER_CHOICES.map((choice) => (
+        <label key={choice.id} className="choice">
+          <input
+            type="radio"
+            name="provider"
+            value={choice.id}
+            checked={provider === choice.id}
+            onChange={() => onSelectProvider(choice.id)}
+          />
+          <span>
+            <strong>{choice.label}</strong>
+            <small>{choice.blurb}</small>
+            <small className="caveat">{choice.caveat}</small>
+          </span>
+        </label>
+      ))}
+      <p className="small">Takes effect on your next message. The hint ladder behaves identically either way.</p>
 
       <h3>Model</h3>
       {MODEL_CHOICES.map((choice) => (
@@ -280,29 +409,16 @@ export function SettingsPanel({
         </label>
       ))}
 
-      <h3>API key</h3>
-      <p className="small">
-        Read from your Dashlane vault at session start through a native helper, and held in the service worker&rsquo;s
-        memory only. It is never written to extension storage or to disk.
-      </p>
-      <p className="small">
-        Dashlane item:{' '}
-        {vaultItemTitle === null ? (
-          <em>checking&hellip;</em>
-        ) : (
-          <code>{vaultItemTitle}</code>
-        )}
-        <br />
-        Change it in <code>~/.config/socrates/native-host.json</code>.
-      </p>
-      <div className="ladder-row">
-        <button type="button" onClick={onProbeKey} disabled={keyState === 'checking'}>
-          {keyState === 'checking' ? 'Checking…' : 'Test vault access'}
-        </button>
-        <span className="small">
-          {keyState === 'ok' ? 'Key loaded.' : keyState === 'failed' ? 'See the message above.' : ''}
-        </span>
-      </div>
+      {provider === 'claude-code' ? (
+        <ClaudeCodeAccess
+          state={claudeState}
+          access={claudeAccess}
+          claudePath={hostInfo?.claudePath ?? null}
+          onProbe={onProbeClaude}
+        />
+      ) : (
+        <VaultAccess state={keyState} vaultItemTitle={hostInfo?.itemTitle ?? null} onProbe={onProbeKey} />
+      )}
     </section>
   );
 }

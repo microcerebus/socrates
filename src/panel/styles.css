@@ -457,7 +457,14 @@ input:focus {
   white-space: pre;
 }
 
+/*
+ * A sheet takes over the column, so it gets the leftover height and scrolls
+ * inside itself. `min-height: 0` is what lets a flex item shrink below its
+ * content and actually scroll instead of pushing the column open.
+ */
 .sheet {
+  flex: 1;
+  min-height: 0;
   margin: 10px 14px;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -493,6 +500,18 @@ input:focus {
 
 .choice small {
   color: var(--text-muted);
+  line-height: 1.45;
+}
+
+/*
+ * The honest cost of a choice: quota sharing on Claude Code, prepaid credits on
+ * the API key. Set apart from the blurb by a rule rather than by colour, so it
+ * reads as a footnote without dropping below the muted contrast floor.
+ */
+.choice .caveat {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
 }
 
 .field {

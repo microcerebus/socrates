@@ -7,12 +7,13 @@
  * evicted the cache dies with it and the next request re-reads the vault.
  */
 
-import { appError, type AppError } from '../shared/types.ts';
-import type { HostFailureCode, HostRequest, HostResponse } from '../native-host/protocol.ts';
+import { appError } from '../shared/types.ts';
+import type { HostRequest, HostResponse } from '../native-host/protocol.ts';
+import { hostFailureToAppError, isHostResponse } from './host-errors.ts';
 
 export const NATIVE_HOST_NAME = 'com.socrates.keychain';
 
-const INSTALL_COMMAND = './bin/install-native-host.sh <extension-id>';
+const INSTALL_COMMAND = './bin/install-native-host.sh';
 
 let cachedKey: string | null = null;
 let inflight: Promise<string> | null = null;
@@ -26,37 +27,10 @@ export function hasCachedKey(): boolean {
   return cachedKey !== null;
 }
 
-function remedyFor(code: HostFailureCode, command: string | undefined): AppError['remedies'] {
-  if (!command) return [];
-  const label =
-    code === 'vault-locked' || code === 'vault-logged-out'
-      ? 'Run this in a terminal, then reopen the panel'
-      : code === 'dcli-missing'
-        ? 'Install the Dashlane CLI'
-        : 'Run this to check';
-  return [{ label, command }];
-}
-
-function hostFailureToAppError(response: Extract<HostResponse, { ok: false }>): AppError {
-  const code =
-    response.code === 'dcli-missing'
-      ? 'dcli-missing'
-      : response.code === 'vault-locked' || response.code === 'vault-logged-out'
-        ? 'vault-locked'
-        : response.code === 'vault-item-missing'
-          ? 'vault-item-missing'
-          : 'key-fetch-failed';
-  return appError(code, response.message, remedyFor(response.code, response.command));
-}
-
 export type NativeSend = (name: string, message: HostRequest) => Promise<unknown>;
 
 const defaultSend: NativeSend = (name, message) =>
   chrome.runtime.sendNativeMessage(name, message) as Promise<unknown>;
-
-function isHostResponse(value: unknown): value is HostResponse {
-  return typeof value === 'object' && value !== null && 'ok' in value;
-}
 
 async function fetchFromVault(send: NativeSend): Promise<string> {
   let raw: unknown;
@@ -83,26 +57,53 @@ async function fetchFromVault(send: NativeSend): Promise<string> {
   return raw.apiKey;
 }
 
-/**
- * Which Dashlane item the native host is configured to read. Non-secret, and the
- * only reason the panel can talk about "the item in Settings" without the
- * extension hardcoding a vault path.
- */
-export async function getVaultItemTitle(send: NativeSend = defaultSend): Promise<string> {
+async function ask(send: NativeSend, request: HostRequest): Promise<Extract<HostResponse, { ok: true }>> {
   let raw: unknown;
   try {
-    raw = await send(NATIVE_HOST_NAME, { kind: 'ping' });
+    raw = await send(NATIVE_HOST_NAME, request);
   } catch (cause) {
     throw appError(
       'native-host-missing',
       `Socrates could not reach its native helper (${NATIVE_HOST_NAME}). (${String(cause)})`,
-      [{ label: 'Run from the repo root', command: INSTALL_COMMAND }],
+      [{ label: 'Run this from the repo root', command: INSTALL_COMMAND }],
     );
   }
   if (!isHostResponse(raw)) throw appError('key-fetch-failed', 'The native helper returned something unexpected.');
   if (!raw.ok) throw hostFailureToAppError(raw);
-  if (raw.kind !== 'pong') throw appError('key-fetch-failed', 'The native helper did not identify its vault item.');
-  return raw.itemTitle;
+  return raw;
+}
+
+export interface HostInfo {
+  /** Which Dashlane item the host reads for the API-key provider. */
+  itemTitle: string;
+  /** The resolved `claude` binary, or null when the host could not find one. */
+  claudePath: string | null;
+}
+
+/**
+ * What the host is configured with, for the settings sheet. Non-secret, and the
+ * only reason the panel can talk about "the item in Settings" or name the CLI it
+ * will run without the extension hardcoding either.
+ */
+export async function getHostInfo(send: NativeSend = defaultSend): Promise<HostInfo> {
+  const response = await ask(send, { kind: 'ping' });
+  if (response.kind !== 'pong') throw appError('key-fetch-failed', 'The native helper did not identify itself.');
+  return { itemTitle: response.itemTitle, claudePath: response.claudePath };
+}
+
+export interface ClaudeAccess {
+  claudePath: string;
+  account: string | null;
+  subscription: string | null;
+}
+
+/** The Claude Code analogue of "Test vault access": is the CLI there, and logged in? */
+export async function probeClaudeAccess(send: NativeSend = defaultSend): Promise<ClaudeAccess> {
+  const response = await ask(send, { kind: 'claude-probe' });
+  if (response.kind !== 'claude-ok') {
+    throw appError('claude-cli-failed', 'The native helper did not report on the Claude Code CLI.');
+  }
+  return { claudePath: response.claudePath, account: response.account, subscription: response.subscription };
 }
 
 /**

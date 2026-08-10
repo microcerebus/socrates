@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 #
-# Registers the Socrates native messaging host with Chrome.
+# Registers the Socrates native messaging host with Chrome and Brave.
 #
-#   ./bin/install-native-host.sh [extension-id]
+#   ./bin/install-native-host.sh [extension-id ...]
 #
 # The manifest pins a public key, so the extension id is stable no matter where
-# dist/ lives - the default below is that id, and you only need to pass one if
-# you have changed the key. Re-run after installing dcli somewhere new.
+# dist/ lives. Both known ids are registered by default, and re-running merges
+# rather than clobbers: any id already present in an installed manifest is kept.
+# Re-run after installing dcli or claude somewhere new.
 #
 # Nothing secret is written. The host manifest points Chrome at a launcher; the
-# launcher runs a Node script that shells out to `dcli` and returns the key on
-# stdout, in memory, once per browser session.
+# launcher runs a Node script that either shells out to `dcli` for the API key or
+# streams a reply from the `claude` CLI, depending on the provider chosen in the
+# panel's settings.
 
 set -euo pipefail
 
 HOST_NAME="com.socrates.keychain"
-# Derived from the public key pinned in public/manifest.json.
-DEFAULT_EXTENSION_ID="lbhnejceegeplldfheefbalbfnhdafnb"
+# Derived from the public key pinned in public/manifest.json. Chrome and Brave
+# have each been seen to hand this build a different id, so both are registered.
+DEFAULT_EXTENSION_IDS=(
+  "lbhnejceegeplldfheefbalbfnhdafnb"
+  "aplbkajcnpggamonmlebeaenjhhnjpdp"
+)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST_SCRIPT="$REPO_ROOT/dist/native-host/socrates-host.mjs"
 LAUNCHER="$REPO_ROOT/dist/native-host/socrates-host"
@@ -25,8 +31,20 @@ CONFIG_FILE="$CONFIG_DIR/native-host.json"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 
-EXTENSION_ID="${1:-${SOCRATES_EXTENSION_ID:-$DEFAULT_EXTENSION_ID}}"
-[[ "$EXTENSION_ID" =~ ^[a-p]{32}$ ]] || die "'$EXTENSION_ID' is not a Chrome extension id (32 letters a-p)"
+if [ "$#" -gt 0 ]; then
+  EXTENSION_IDS=("$@")
+elif [ -n "${SOCRATES_EXTENSION_IDS:-}" ]; then
+  # shellcheck disable=SC2206  # deliberate word splitting on a space-separated list
+  EXTENSION_IDS=(${SOCRATES_EXTENSION_IDS})
+elif [ -n "${SOCRATES_EXTENSION_ID:-}" ]; then
+  EXTENSION_IDS=("$SOCRATES_EXTENSION_ID")
+else
+  EXTENSION_IDS=("${DEFAULT_EXTENSION_IDS[@]}")
+fi
+
+for id in "${EXTENSION_IDS[@]}"; do
+  [[ "$id" =~ ^[a-p]{32}$ ]] || die "'$id' is not a Chrome extension id (32 letters a-p)"
+done
 
 [ -f "$HOST_SCRIPT" ] || die "missing $HOST_SCRIPT - run 'pnpm build' first"
 
@@ -41,7 +59,7 @@ exec "$NODE_BIN" "$HOST_SCRIPT" "\$@"
 EOF
 chmod +x "$LAUNCHER"
 
-# --- host manifest, for every Chrome flavour installed -----------------------
+# --- host manifest, for every Chromium flavour installed ---------------------
 
 case "$(uname -s)" in
   Darwin)
@@ -49,12 +67,14 @@ case "$(uname -s)" in
       "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
       "$HOME/Library/Application Support/Google/Chrome Beta/NativeMessagingHosts"
       "$HOME/Library/Application Support/Google/Chrome Canary/NativeMessagingHosts"
+      "$HOME/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts"
       "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"
     )
     ;;
   Linux)
     TARGET_DIRS=(
       "$HOME/.config/google-chrome/NativeMessagingHosts"
+      "$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
       "$HOME/.config/chromium/NativeMessagingHosts"
     )
     ;;
@@ -63,31 +83,57 @@ case "$(uname -s)" in
     ;;
 esac
 
-MANIFEST=$(cat <<EOF
-{
-  "name": "$HOST_NAME",
-  "description": "Reads the Anthropic API key for Socrates out of Dashlane.",
-  "path": "$LAUNCHER",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
+# Written by node rather than a heredoc so an existing manifest's allowed_origins
+# can be read and merged: registering one browser must not deregister another.
+write_manifest() {
+  "$NODE_BIN" - "$1" "$HOST_NAME" "$LAUNCHER" "${EXTENSION_IDS[@]}" <<'NODE'
+const { readFileSync, writeFileSync } = require('node:fs');
+const [file, hostName, launcher, ...ids] = process.argv.slice(2);
+
+let existing = [];
+try {
+  const previous = JSON.parse(readFileSync(file, 'utf8'));
+  if (Array.isArray(previous.allowed_origins)) existing = previous.allowed_origins;
+} catch {
+  /* no manifest yet, or an unreadable one we are about to replace */
 }
-EOF
-)
+
+const wanted = ids.map((id) => `chrome-extension://${id}/`);
+const allowed_origins = [...new Set([...existing, ...wanted])];
+
+writeFileSync(
+  file,
+  `${JSON.stringify(
+    {
+      name: hostName,
+      description: 'Reads the Anthropic API key for Socrates out of Dashlane, and runs the Claude Code CLI for it.',
+      path: launcher,
+      type: 'stdio',
+      allowed_origins,
+    },
+    null,
+    2,
+  )}\n`,
+);
+console.log(`${allowed_origins.length} origin(s)`);
+NODE
+}
 
 INSTALLED=0
 for dir in "${TARGET_DIRS[@]}"; do
   parent="$(dirname "$dir")"
   [ -d "$parent" ] || continue
   mkdir -p "$dir"
-  printf '%s\n' "$MANIFEST" > "$dir/$HOST_NAME.json"
-  printf 'registered  %s\n' "$dir/$HOST_NAME.json"
+  origins="$(write_manifest "$dir/$HOST_NAME.json")"
+  printf 'registered  %s (%s)\n' "$dir/$HOST_NAME.json" "$origins"
   INSTALLED=1
 done
-[ "$INSTALLED" -eq 1 ] || die "no Chrome profile directory found - is Chrome installed for this user?"
+[ "$INSTALLED" -eq 1 ] || die "no Chrome or Brave profile directory found - is one installed for this user?"
 
 # --- non-secret host config --------------------------------------------------
 
 DCLI_BIN="$(command -v dcli || true)"
+CLAUDE_BIN="$(command -v claude || true)"
 ITEM_TITLE="${SOCRATES_ITEM_TITLE:-Anthropic API Key}"
 ITEM_FIELD="${SOCRATES_ITEM_FIELD:-content}"
 
@@ -99,14 +145,20 @@ else
 {
   "dcliPath": "${DCLI_BIN:-/opt/homebrew/bin/dcli}",
   "itemTitle": "$ITEM_TITLE",
-  "itemField": "$ITEM_FIELD"
+  "itemField": "$ITEM_FIELD",
+  "claudePath": "${CLAUDE_BIN:-$HOME/.local/bin/claude}"
 }
 EOF
   printf 'wrote      %s\n' "$CONFIG_FILE"
 fi
 
+if [ -z "$CLAUDE_BIN" ]; then
+  printf '\nwarning: claude is not on PATH, so the default Claude Code provider has nothing to run.\n'
+  printf 'Install it from https://claude.com/claude-code, then re-run this script.\n'
+fi
 if [ -z "$DCLI_BIN" ]; then
-  printf '\nwarning: dcli is not on PATH. Install it with:\n  brew install dashlane/tap/dashlane-cli\nthen re-run this script.\n'
+  printf '\nnote: dcli is not on PATH. It is only needed for the "Anthropic API key" provider:\n'
+  printf '  brew install dashlane/tap/dashlane-cli\n'
 fi
 
 cat <<EOF
@@ -114,7 +166,12 @@ cat <<EOF
 Done. Next:
   1. Reload the extension on chrome://extensions (native host manifests are read at connect time,
      but reloading clears any cached failure).
-  2. Make sure your vault has an item titled "$ITEM_TITLE" whose $ITEM_FIELD is the Anthropic API key:
-       dcli read "dl://$ITEM_TITLE/$ITEM_FIELD"
-  3. Open a LeetCode problem and click the Socrates icon.
+  2. Open a LeetCode problem and click the Socrates icon.
+
+The default provider is Claude Code, which needs nothing but a logged-in CLI:
+  ${CLAUDE_BIN:-claude} auth status
+
+To use the Anthropic API key instead, switch provider in the panel's settings and make sure your
+vault has an item titled "$ITEM_TITLE" whose $ITEM_FIELD is the key:
+  dcli read "dl://$ITEM_TITLE/$ITEM_FIELD"
 EOF

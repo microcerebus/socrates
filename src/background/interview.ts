@@ -4,7 +4,11 @@
  *
  * Kept separate from `service-worker.ts` (which touches `chrome.*` at module
  * scope) so the whole path - prompt construction through redaction - can be
- * exercised against a mocked Anthropic API.
+ * exercised against a mocked provider.
+ *
+ * Nothing here knows which provider is in use. The system prompt, the message
+ * list and the guard are built the same way whichever transport is passed in,
+ * which is the single reason rung discipline cannot drift between providers.
  */
 
 import { buildUserTurn } from '../prompt/context.ts';
@@ -12,7 +16,8 @@ import { createSpoilerGuard } from '../prompt/spoiler-guard.ts';
 import { buildSystemPrompt } from '../prompt/system-prompt.ts';
 import type { AskRequest } from '../shared/protocol.ts';
 import type { ModelId } from '../shared/types.ts';
-import { streamMessage, type ApiMessage } from './anthropic.ts';
+import type { ApiMessage } from './anthropic.ts';
+import type { ProviderStream } from './providers.ts';
 
 const MAX_HISTORY_TURNS = 12;
 
@@ -39,26 +44,24 @@ export function toApiMessages(request: AskRequest): ApiMessage[] {
 }
 
 export interface InterviewTurnOptions {
-  apiKey: string;
   model: ModelId;
   request: AskRequest;
+  /** Where the tokens come from. See `providers.ts`. */
+  stream: ProviderStream;
   onText(text: string): void;
   onThinking?(): void;
   signal?: AbortSignal;
-  fetchImpl?: typeof fetch;
 }
 
 export async function runInterviewTurn(options: InterviewTurnOptions): Promise<void> {
   const { request } = options;
   const guard = createSpoilerGuard(request.rung);
 
-  await streamMessage({
-    apiKey: options.apiKey,
+  await options.stream({
     model: options.model,
     system: buildSystemPrompt({ rung: request.rung, language: request.snapshot.editor.language }),
     messages: toApiMessages(request),
     ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     ...(options.onThinking ? { onThinking: options.onThinking } : {}),
     onText: (text) => {
       const safe = guard.push(text);
