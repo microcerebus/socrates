@@ -29,6 +29,12 @@ import {
   type ProbeState,
 } from './components.tsx';
 import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
+import {
+  activeOverride,
+  effectiveLanguage,
+  isSameProblem,
+  type LanguageOverride,
+} from './language-choice.ts';
 import { classifyCapture } from './problem-switch.ts';
 import { createSessionWriter, type Current } from './session-writer.ts';
 import { createSettingsWriter } from './settings-writer.ts';
@@ -114,10 +120,11 @@ export function App(): ReactNode {
    * Mirroring is the default because the panel is a view of LeetCode: switching
    * the editor to Rust and then being handed Python pseudocode would be the
    * panel disagreeing with the thing it is sitting next to. An explicit pick
-   * from the dropdown is a departure from that, so it holds for the sitting -
-   * `null` means "follow the page", and that is what the reset restores.
+   * from the dropdown is a departure from that, so it holds - but only for the
+   * problem it was made on, which is why it carries a slug rather than being a
+   * bare string. See `language-choice.ts`.
    */
-  const [languageOverride, setLanguageOverride] = useState<string | null>(null);
+  const [languageOverride, setLanguageOverride] = useState<LanguageOverride | null>(null);
 
   const [rung, setRung] = useState<Rung>(0);
   const [deepestRung, setDeepestRung] = useState<Rung>(0);
@@ -205,7 +212,13 @@ export function App(): ReactNode {
   // Re-read from the snapshot every render, so a language changed in the
   // LeetCode toolbar mid-session is followed as soon as the next capture lands.
   const pageLanguage = snapshot?.editor.language ?? null;
-  const language = languageOverride ?? pageLanguage ?? DEFAULT_LANGUAGE_ID;
+  const problemSlug = snapshot?.problem.slug ?? null;
+  const language = effectiveLanguage(
+    languageOverride,
+    problemSlug,
+    pageLanguage,
+    DEFAULT_LANGUAGE_ID,
+  );
 
   // The live attempt is upserted as the user climbs, so it is already in the
   // stored list; showing it back as "an earlier attempt" would be a lie.
@@ -340,9 +353,9 @@ export function App(): ReactNode {
       setTurns([]);
       setRung(0);
       setDeepestRung(0);
-      // A different problem is a different sitting, and the new page carries its
-      // own selected language. Keeping the old override would silently answer
-      // the next problem in a language the editor is not set to.
+      // Tidiness rather than correctness: an override carries the slug it was
+      // chosen for, so it could not apply here anyway. Dropping it keeps the
+      // state honest about what the panel is actually doing.
       setLanguageOverride(null);
       setStarted(false);
       setStreaming(null);
@@ -577,7 +590,14 @@ export function App(): ReactNode {
         // Resolved against the capture this turn is actually running on, not
         // against the render's snapshot: switching the LeetCode editor and
         // immediately asking should already be answered in the new language.
-        language: languageOverride ?? current.editor.language ?? DEFAULT_LANGUAGE_ID,
+        // Passing that capture's *slug* is what makes an override that belongs
+        // to a different problem inapplicable here rather than merely unlikely.
+        language: effectiveLanguage(
+          languageOverride,
+          current.problem.slug,
+          current.editor.language,
+          DEFAULT_LANGUAGE_ID,
+        ),
         history: turns,
         elapsedMs: Date.now() - sessionStart,
       };
@@ -813,14 +833,26 @@ export function App(): ReactNode {
         <PasteForm
           reason={captureFailure}
           onSubmit={(pasted) => {
-            // Through the same setter as every capture, so the next read of the
-            // page is classified against the paste and loses to it.
-            showSnapshot(pasted);
-            sessionWriter.setActive(pasted.problem.slug);
             setShowPaste(false);
             setCaptureFailure(null);
-            loadAttempts(pasted.problem.slug);
-            offerResume(pasted.problem.slug);
+            /*
+             * A paste is an adoption like any other. Pasting a *different*
+             * problem is the same event as navigating to one - the ladder goes
+             * back to rung 0, the old transcript is written under its own slug,
+             * and the language override is left behind - so it goes through the
+             * same function rather than a hand-rolled subset of it, which is
+             * what let an override survive a paste onto a different problem.
+             *
+             * Re-pasting the problem already on screen is a correction to the
+             * text, not a new sitting: it refreshes what the model reads and
+             * keeps everything the user has earned, override included.
+             */
+            if (isSameProblem(showingRef.current, pasted)) {
+              showSnapshot(pasted);
+              sessionWriter.setActive(pasted.problem.slug);
+              return;
+            }
+            adoptProblem(pasted);
           }}
           onCancel={snapshot ? () => setShowPaste(false) : null}
         />
@@ -869,9 +901,15 @@ export function App(): ReactNode {
               <LanguagePicker
                 language={language}
                 pageLanguage={pageLanguage}
-                overridden={languageOverride !== null}
+                overridden={activeOverride(languageOverride, problemSlug) !== null}
                 disabled={disabled}
-                onSelect={(next) => setLanguageOverride(next === pageLanguage ? null : next)}
+                onSelect={(next) =>
+                  setLanguageOverride(
+                    next === pageLanguage || problemSlug === null
+                      ? null
+                      : { slug: problemSlug, language: next },
+                  )
+                }
                 onFollowPage={() => setLanguageOverride(null)}
               />
               <p className="small footnote">
