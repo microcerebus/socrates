@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  A Runtime Error, and deliberately *without* a flexlayout wrapper.
+
+  Two things are being covered here. The first is the verdict shape: an error has
+  no Input/Output/Expected blocks, it has a red error wash and a "Last Executed
+  Input" heading whose own element also carries an "Open Testcase" link - so the
+  parser cannot read the heading with `textContent`.
+
+  The second is the container fallback. With no `[data-layout-path]` ancestor the
+  parser has to climb from the verdict until it finds something that is part of a
+  result, which is the path an older or restyled page would take.
+-->
+<html lang="en"><head><meta charset="utf-8"><title>Two Sum - LeetCode</title></head>
+<body>
+<div id="__next">
+  <div id="qd-content">
+    <div class="mx-5 my-4 space-y-4">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1">
+          <span class="mr-2 whitespace-nowrap text-xl font-medium" data-e2e-locator="console-result">Runtime Error</span>
+        </div>
+      </div>
+      <div class="group relative rounded-lg bg-[rgba(246,54,54,0.08)] px-3 py-4">
+        <div class="whitespace-pre-wrap break-all font-menlo text-xs">Line 6: IndexError: list index out of range</div>
+      </div>
+      <div class="flex h-full w-full flex-col space-y-2 rounded-lg">
+        <div class="flex flex-row text-[12px] font-medium"><span>Stdout</span></div>
+        <div class="relative rounded-lg px-3 py-[10px]">
+          <div class="group w-full whitespace-pre-wrap font-menlo text-sm">i = 0</div>
+        </div>
+      </div>
+      <div>
+        <div class="mb-2 flex items-center justify-between text-xs font-medium">Last Executed Input<a class="flex cursor-pointer items-center">Open Testcase</a></div>
+        <div class="flex flex-col space-y-2">
+          <div class="px-3 text-xs">nums =</div>
+          <div class="font-menlo text-sm">[]</div>
+          <div class="px-3 text-xs">target =</div>
+          <div class="font-menlo text-sm">0</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

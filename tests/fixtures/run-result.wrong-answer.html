@@ -1,0 +1,63 @@
+<!doctype html>
+<!--
+  The console after Run, on a failing case.
+
+  Modelled on the live markup: the verdict carries LeetCode's own
+  `data-e2e-locator="console-result"` hook, and each value block is a heading
+  `div` followed by a sibling holding the content, with no hook of its own - which
+  is why the parser matches the heading wording. The input is rendered one `div`
+  per parameter, so `textContent` on it would read `nums =[3,2,4]target =6`.
+-->
+<html lang="en"><head><meta charset="utf-8"><title>Two Sum - LeetCode</title></head>
+<body>
+<div id="__next">
+  <div id="qd-content" class="relative flex h-full w-full">
+    <div class="flexlayout__tab" data-layout-path="/c1/ts1/t0">
+      <div class="flex">
+        <button data-e2e-locator="console-testcase-tag">Case 1</button>
+        <button data-e2e-locator="console-testcase-tag">Case 2</button>
+      </div>
+      <div data-e2e-locator="console-testcase-input">[3,2,4]</div>
+      <div data-e2e-locator="console-testcase-input">6</div>
+    </div>
+    <div class="flexlayout__tab" data-layout-path="/c1/ts1/t1">
+      <div class="space-y-4 px-5 py-4">
+        <div class="flex items-center">
+          <div class="text-xl font-medium text-red-s" data-e2e-locator="console-result">Wrong Answer</div>
+          <div class="ml-4 text-label-3">Runtime: 3 ms</div>
+        </div>
+        <div class="flex items-center gap-1">
+          <span>2 / 3 testcases passed</span>
+        </div>
+        <div class="flex">
+          <div class="rounded px-3 py-1">Case 1</div>
+          <div class="rounded px-3 py-1">Case 2</div>
+        </div>
+        <div class="space-y-4">
+          <div>
+            <div class="mb-2 text-xs font-medium text-label-3">Input</div>
+            <div class="flex flex-col space-y-2">
+              <div class="px-3 text-xs">nums =</div>
+              <div class="font-menlo text-sm">[3,2,4]</div>
+              <div class="px-3 text-xs">target =</div>
+              <div class="font-menlo text-sm">6</div>
+            </div>
+          </div>
+          <div class="flex h-full w-full flex-col space-y-2">
+            <div class="flex text-xs font-medium text-label-3">Stdout</div>
+            <div class="font-menlo text-sm">scanning 3 values</div>
+          </div>
+          <div class="flex h-full w-full flex-col space-y-2">
+            <div class="flex text-xs font-medium text-label-3">Output</div>
+            <div class="font-menlo text-sm">[]</div>
+          </div>
+          <div class="flex h-full w-full flex-col space-y-2">
+            <div class="flex text-xs font-medium text-label-3">Expected</div>
+            <div class="font-menlo text-sm">[1,2]</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>

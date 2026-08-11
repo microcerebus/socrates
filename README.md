@@ -87,7 +87,30 @@ It also always offers a legal alternative to leaking, which is to say that the h
 
 **The spoiler guard** (`src/prompt/spoiler-guard.ts`) is a deterministic backstop over the response stream.
 Below rung 4 it strips fenced code blocks and replaces them with a notice, holding text back at a fence boundary rather than letting a partial block reach the panel and then retracting it.
-It only enforces the one rule that is unambiguous enough to enforce mechanically; softer rules are left to the prompt, because pattern-matching them against prose produces false positives that mangle legitimate replies.
+Below rung 2 it also strips LeetCode's own topic tags - see below.
+It enforces only the rules that are unambiguous enough to enforce mechanically; softer ones are left to the prompt, because pattern-matching them against prose produces false positives that mangle legitimate replies.
+
+### Topic tags never reach you
+
+LeetCode labels every problem with the technique it wants: "Hash Table", "Two Pointers", "Dynamic Programming".
+The panel reads those tags and puts them in the model's context, because knowing where a problem is going is what lets an interviewer aim a rung-1 question instead of guessing.
+They sit behind a collapsed "Topics" toggle that most people never open, so they are treated as something you have not seen:
+
+- the panel **never displays them, at any rung** - a test reads `src/panel/`'s own source and fails if the field is so much as named there;
+- the prompt states the boundary explicitly, with the reason attached;
+- and below rung 2 the guard strips the tag out of the reply stream, in every form it has - "Heap"/"heaps", "Hash Table"/"hash-tables"/"the hash table's" - split across chunks included.
+
+The guard withholds a _concept_, not a spelling, because withholding only the spelling LeetCode happened to use is the same leak with a false sense of coverage.
+It covers case, the separators between words, number in both directions, possessives, and inflections of the stem; synonyms, abbreviations and paraphrase are the prompt's job, because matching those mechanically means matching ordinary English.
+
+It also withholds only what you have **not already read**.
+LeetCode tags a problem `Array` and `String` as readily as `Hash Table`, and a Two Sum statement opens "given an array of integers" - so redacting that word would protect nothing while turning the reply into "you scan the [withheld] twice".
+Tags quoted in the statement, title, examples or constraints are dropped from the guard's set; the rest are withheld in full.
+
+The guard covers tags but not the rung-1 technique-name list, and the asymmetry is deliberate.
+Those words have innocent uses ("your stack of conditions"), and redacting them would maul ordinary sentences.
+A tag is different in one decisive way: you have not seen it, so passing it through is not a hint you asked for at a rung you earned - it is the panel handing over the answer with its own hand.
+That is what earns the false positives.
 
 Both layers are covered by `tests/prompt-gating.test.ts` and `tests/claude-code.test.ts`, which assert on the system prompt built for each rung and on what comes back out of the guard.
 
@@ -119,16 +142,17 @@ A request/response call like `ping` is one message in, one message out, so it ri
 A model reply cannot: it arrives as hundreds of small frames over tens of seconds, and `sendNativeMessage` gives you exactly one.
 So streaming a reply opens a `connectNative` port instead, one per turn - a port that dies with its request needs no routing, reconnection or staleness rules, and disconnecting is itself the hardest cancellation available.
 
-| Path                              | Role                                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| `src/prompt/`                     | Rung definitions, the system prompt, the context turn, the spoiler guard       |
-| `src/background/`                 | Service worker: page capture, the Claude Code transport, the session log       |
-| `src/background/providers.ts`     | The transport `interview.ts` calls, behind one function type                   |
-| `src/content/`                    | Isolated-world scraper plus the MAIN-world Monaco bridge                       |
-| `src/content/scrape/selectors.ts` | Every LeetCode DOM selector, in one file, as fallback chains                   |
-| `src/panel/`                      | The React side panel                                                           |
-| `src/native-host/`                | The native messaging host: runs `claude` headlessly and streams its reply back |
-| `src/shared/`                     | Types and the panel/worker wire protocol                                       |
+| Path                              | Role                                                                             |
+| --------------------------------- | -------------------------------------------------------------------------------- |
+| `src/prompt/`                     | Rung definitions, the system prompt, the context turn, the spoiler guard         |
+| `src/background/`                 | Service worker: page capture, the Claude Code transport, the session log         |
+| `src/background/providers.ts`     | The transport `interview.ts` calls, behind one function type                     |
+| `src/content/`                    | Isolated-world scraper plus the MAIN-world Monaco bridge                         |
+| `src/content/scrape/selectors.ts` | Every LeetCode DOM selector, in one file, as fallback chains                     |
+| `src/panel/`                      | The React side panel                                                             |
+| `src/native-host/`                | The native messaging host: runs `claude` headlessly and streams its reply back   |
+| `src/shared/`                     | Types and the panel/worker wire protocol                                         |
+| `src/shared/languages.ts`         | The 25 languages LeetCode compiles, read off leetcode.com rather than remembered |
 
 ### Running the Claude Code CLI
 
@@ -144,6 +168,37 @@ LeetCode uses Monaco, which virtualises long files: only the lines currently on 
 Scraping `.view-line` elements therefore truncates silently, which is worse than failing.
 So a MAIN-world content script reads the editor _model_ (`monaco.editor.getModels()`), which holds the whole buffer, and posts it back to the isolated content script.
 The extension is read-only on the page: it never types, clicks, or submits.
+
+### What else is read off the page
+
+Everything past the description is optional by construction - absent sections are omitted, never errors - and all of it rides on the turn context under headings that say where it came from.
+
+| Read                              | Used for                                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Selected editor language          | The language every reply is written in                                                                        |
+| Topic tags                        | Model context only, and gated below rung 2. See above                                                         |
+| Difficulty, problem number, title | Framing                                                                                                       |
+| Examples and constraints          | The statement the model reasons from                                                                          |
+| Editorial and hints **presence**  | So the interviewer knows not to mention them. Never their content                                             |
+| The run/submission result         | Verdict, the failing input, your output against the expected one, stdout, and the compiler or runtime message |
+
+The last one is what changes "check my code" the most: with the actual failing input in hand the interviewer can talk about the defect rather than reading the code and guessing.
+It stays inside the ladder - below rung 4 the analysis follows the rung's existing review policy, so you get the concrete symptom without the fix.
+
+**Everything on this list is untrusted input.** It comes off a web page, and a problem page you did not write can put anything in it.
+Two consequences are worth knowing about:
+
+- The language is not free text. Every path to it - the toolbar label, Monaco's id, `data-mode-id`, the bridge's reply - goes through an allowlist of the 25 ids in `src/shared/languages.ts`, which is _total_: it takes `unknown` and returns `null` for anything else. The MAIN-world bridge runs in page context, so the page chooses the type as well as the value.
+- The topic tags and every field of the run result are wrapped in the same `<<<PAGE-DATA id=…>>>` fence as the statement and your editor buffer (`src/prompt/untrusted.ts`), one block per value. The run result is why a ``` fence would not do: it is the judge echoing your own program's output back at you, so it contains whatever you printed.
+
+### Language
+
+The panel mirrors LeetCode's editor by default, including when you change it mid-session, because the panel is a view of the page.
+The dropdown lists every language LeetCode compiles; picking one is a deliberate departure, so it sticks for the sitting and stops the mirroring until you press "follow LeetCode" (or move to another problem, which resets it along with the ladder).
+
+`src/shared/languages.ts` is the single source of that list, and its ids are LeetCode's own slugs.
+That is not a coincidence worth relying on blindly but it is a measured fact: LeetCode registers its Monaco languages under those slugs, so selecting Go leaves `model.getLanguageId() === 'golang'` and Python3 leaves `'python3'`.
+The toolbar label is read as well and wins, because it is isolated-world DOM and still answers when the Monaco bridge does not.
 
 ### When the page drifts
 
@@ -282,18 +337,20 @@ Re-run the installer after any build you intend to load, or native messaging sil
 
 ### Tests
 
-| File                                | Covers                                                                                                                                                                |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/prompt-gating.test.ts`       | Rung gating in the system prompt, the context turn, and the spoiler guard in isolation                                                                                |
-| `tests/scraper.test.ts`             | The scraper against saved LeetCode HTML: current layout, a drifted layout, and an unrecognisable one                                                                  |
-| `tests/native-host.test.ts`         | Native messaging framing, config parsing, and request dispatch                                                                                                        |
-| `tests/claude-host.test.ts`         | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
-| `tests/claude-code.test.ts`         | The extension half: the streaming port, cancellation, error mapping, transcript flattening, rung gating end to end, and race-safe settings writes                     |
-| `tests/streaming-ux.test.ts`        | The CLI frames a turn in flight is read from, the host's liveness heartbeat against a real child process, the phase machine and stall detector, and the reveal pacer  |
-| `tests/session-resume.test.ts`      | Saving and restoring a session with its rung, surviving junk already on disk, and every storage bound                                                                 |
-| `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed                           |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/prompt-gating.test.ts` | Rung gating in the system prompt, the context turn, and the spoiler guard in isolation |
+| `tests/scraper.test.ts` | The scraper against saved LeetCode HTML: current layout, a drifted layout, an unrecognisable one, four run-result panels, and the language list |
+| `tests/content-script.test.ts` | The real content script against a hostile MAIN-world bridge: no reply shape may leave the capture unsettled |
+| `tests/untrusted.test.ts` | That page text cannot leave its container in the prompt, including a run result that forges its own headings |
+| `tests/tag-morphology.test.ts` | Every form of every real LeetCode topic tag, whole and split at every stream offset, plus the prose the guard must leave alone |
+| `tests/native-host.test.ts` | Native messaging framing, config parsing, and request dispatch |
+| `tests/claude-host.test.ts` | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
+| `tests/claude-code.test.ts` | The extension half: the streaming port, cancellation, error mapping, transcript flattening, rung gating end to end, and race-safe settings writes |
+| `tests/streaming-ux.test.ts` | The CLI frames a turn in flight is read from, the host's liveness heartbeat against a real child process, the phase machine and stall detector, and the reveal pacer |
+| `tests/session-resume.test.ts` | Saving and restoring a session with its rung, surviving junk already on disk, and every storage bound |
+| `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed |
 
-The problem bodies in `tests/fixtures/` are the real ones from LeetCode's public GraphQL endpoint; the page markup around them mirrors the live description tab.
+The problem bodies in `tests/fixtures/` are the real ones from LeetCode's public GraphQL endpoint; the page markup around them mirrors the live description tab, the editor toolbar, and the four shapes the console result takes.
 `tests/fixtures/fake-claude.mjs` is a stand-in for the CLI whose frames are copied from real `--output-format stream-json` runs, so the streaming tests spawn a real child process without spending a usage window.
 
 ### Changing the prompt

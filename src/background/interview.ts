@@ -37,6 +37,7 @@ export function toApiMessages(request: AskRequest): ApiMessage[] {
       intent: request.intent,
       message: request.message,
       elapsedMs: request.elapsedMs,
+      language: request.language,
     }),
   });
   return history;
@@ -55,11 +56,30 @@ export interface InterviewTurnOptions {
 
 export async function runInterviewTurn(options: InterviewTurnOptions): Promise<void> {
   const { request } = options;
-  const guard = createSpoilerGuard(request.rung);
+  /*
+   * The tags reach the guard as well as the prompt: they are the one piece of
+   * context the user has not seen, so the reply is checked against them rather
+   * than trusted to have left them alone.
+   *
+   * The problem text goes with them, because "not seen" is the whole premise.
+   * LeetCode tags a problem `Array` and `String` as readily as `Hash Table`, and
+   * withholding a word the statement opens with protects nothing while turning
+   * the reply into "you scan the [withheld] twice". See `spoiler-guard.ts`.
+   */
+  const { problem } = request.snapshot;
+  const guard = createSpoilerGuard(request.rung, {
+    topicTags: problem.topicTags,
+    visibleText: [
+      problem.title,
+      problem.statement,
+      ...problem.examples,
+      ...problem.constraints,
+    ].join('\n'),
+  });
 
   await options.stream({
     model: options.model,
-    system: buildSystemPrompt({ rung: request.rung, language: request.snapshot.editor.language }),
+    system: buildSystemPrompt({ rung: request.rung, language: request.language }),
     messages: toApiMessages(request),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.onStarted ? { onStarted: options.onStarted } : {}),

@@ -1,6 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { RUNGS, TOTAL_HINTS, hintsUsedFor, rungSpec } from '../prompt/rungs.ts';
+import { DEFAULT_LANGUAGE_ID, LEETCODE_LANGUAGES, languageLabel } from '../shared/languages.ts';
+import { pastedSnapshot } from '../shared/pasted-problem.ts';
 import {
   MODEL_CHOICES,
   type AppError,
@@ -460,6 +462,93 @@ export function Ladder({
   );
 }
 
+/**
+ * The language options, grouped the way LeetCode groups its problems.
+ *
+ * Flat, the list buries JavaScript under five SQL dialects and Bash; grouped, the
+ * nineteen languages an ordinary problem offers stay together and the database
+ * ones are still reachable for the problems that need them. The order inside
+ * each group is LeetCode's own dropdown order, not alphabetical, so the two
+ * lists read the same way.
+ */
+const LANGUAGE_GROUPS: readonly { label: string; family: 'algorithm' | 'database' | 'shell' }[] = [
+  { label: 'Languages', family: 'algorithm' },
+  { label: 'Database', family: 'database' },
+  { label: 'Shell', family: 'shell' },
+];
+
+/**
+ * What the interviewer writes in.
+ *
+ * It mirrors the LeetCode editor by default, including when the user changes it
+ * mid-session, because that is nearly always what they mean - the panel is a
+ * view of the page. Choosing from the dropdown is a deliberate departure, so it
+ * sticks until they say otherwise, and the row says which of the two states it
+ * is in rather than leaving them to infer it from the label alone.
+ */
+export function LanguagePicker({
+  language,
+  pageLanguage,
+  overridden,
+  disabled,
+  onSelect,
+  onFollowPage,
+}: {
+  /** The effective language: what replies will actually be written in. */
+  language: string;
+  /** What the LeetCode editor is set to, or null when the page could not be read. */
+  pageLanguage: string | null;
+  overridden: boolean;
+  disabled: boolean;
+  onSelect: (language: string) => void;
+  onFollowPage: () => void;
+}): ReactNode {
+  const known = LEETCODE_LANGUAGES.some((entry) => entry.id === language);
+  return (
+    <div className="language-row">
+      <label className="language-pick">
+        <span className="sr-only">Language</span>
+        {/* `.select-shell` is what carries the chevron; see `styles.css`. */}
+        <span className="select-shell">
+          <select
+            value={language}
+            disabled={disabled}
+            onChange={(event) => onSelect(event.target.value)}
+            aria-label="Language"
+          >
+            {/*
+              The page can be set to something this list does not know - a
+              language LeetCode has added, or `plaintext` when the editor was
+              unreadable. Showing it keeps the control honest about what the
+              model is being told, instead of silently displaying a different
+              language.
+            */}
+            {known ? null : <option value={language}>{languageLabel(language)}</option>}
+            {LANGUAGE_GROUPS.map((group) => (
+              <optgroup key={group.family} label={group.label}>
+                {LEETCODE_LANGUAGES.filter((entry) => entry.family === group.family).map(
+                  (entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.label}
+                    </option>
+                  ),
+                )}
+              </optgroup>
+            ))}
+          </select>
+        </span>
+      </label>
+      {overridden ? (
+        <button type="button" className="link" onClick={onFollowPage} disabled={disabled}>
+          follow LeetCode{pageLanguage ? ` (${languageLabel(pageLanguage)})` : ''}
+        </button>
+      ) : (
+        <span className="small">following LeetCode</span>
+      )}
+    </div>
+  );
+}
+
 export function Composer({
   busy,
   disabled,
@@ -716,7 +805,7 @@ export function PasteForm({
   const [title, setTitle] = useState('');
   const [statement, setStatement] = useState('');
   const [code, setCode] = useState('');
-  const [language, setLanguage] = useState('javascript');
+  const [language, setLanguage] = useState(DEFAULT_LANGUAGE_ID);
 
   return (
     <section className="sheet">
@@ -753,34 +842,28 @@ export function PasteForm({
       </label>
       <label className="field">
         <span>Language</span>
-        <input value={language} onChange={(event) => setLanguage(event.target.value)} />
+        <span className="select-shell">
+          <select value={language} onChange={(event) => setLanguage(event.target.value)}>
+            {LANGUAGE_GROUPS.map((group) => (
+              <optgroup key={group.family} label={group.label}>
+                {LEETCODE_LANGUAGES.filter((entry) => entry.family === group.family).map(
+                  (entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.label}
+                    </option>
+                  ),
+                )}
+              </optgroup>
+            ))}
+          </select>
+        </span>
       </label>
       <div className="ladder-row">
         <button
           type="button"
           className="primary"
           disabled={statement.trim() === ''}
-          onClick={() =>
-            onSubmit({
-              problem: {
-                slug:
-                  title
-                    .trim()
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, '-')
-                    .replace(/^-|-$/g, '') || 'pasted-problem',
-                title: title.trim() || 'Pasted problem',
-                url: null,
-                difficulty: null,
-                statement: statement.trim(),
-                examples: [],
-                constraints: [],
-                source: 'manual',
-              },
-              editor: { language: language.trim() || 'plaintext', code, source: 'manual' },
-              capturedAt: Date.now(),
-            })
-          }
+          onClick={() => onSubmit(pastedSnapshot({ title, statement, code, language }, Date.now()))}
         >
           Use this
         </button>

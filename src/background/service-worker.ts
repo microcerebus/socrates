@@ -82,7 +82,12 @@ async function capture(
     };
   }
   return {
-    snapshot: { problem: response.problem, editor: response.editor, capturedAt: Date.now() },
+    snapshot: {
+      problem: response.problem,
+      editor: response.editor,
+      run: response.run,
+      capturedAt: Date.now(),
+    },
   };
 }
 
