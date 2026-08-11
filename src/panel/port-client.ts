@@ -163,14 +163,23 @@ export class PortClient {
     this.#handlers.set(id, handler);
     const request = build(id);
 
-    // Reopening here rather than on the disconnect keeps the worker asleep until
-    // there is actually something for it to do, which is the whole point of MV3.
-    const port = this.#port ?? this.#open();
+    /*
+     * Reopening here rather than on the disconnect keeps the worker asleep until
+     * there is actually something for it to do, which is the whole point of MV3.
+     *
+     * Connecting is inside the `try` as well as posting, because `connect` is
+     * the call that throws when the extension context has been invalidated -
+     * after a reload, say. Nothing below may throw out of this method: `ask`
+     * calls it outside any promise, from a click handler that has already set
+     * the spinner going, which is exactly how the original bug became a hang
+     * rather than an error.
+     */
     try {
-      port.postMessage(request);
+      (this.#port ?? this.#open()).postMessage(request);
     } catch {
-      // The disconnect had not been delivered yet. The worker never saw this
-      // request, so re-sending it on a fresh port costs nothing.
+      // Either the disconnect had not been delivered yet or the port could not
+      // be opened at all. Nothing reached the worker, so re-sending costs
+      // nothing.
       this.#port = null;
       try {
         this.#open().postMessage(request);

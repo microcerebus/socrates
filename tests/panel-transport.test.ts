@@ -169,6 +169,37 @@ describe('the panel keeps talking to a worker Chrome keeps stopping', () => {
     await expect(pending).resolves.toEqual(DEFAULT_SETTINGS);
   });
 
+  it('reports an unreachable worker rather than throwing out of the click handler', () => {
+    // `chrome.runtime.connect` throws once the extension context is invalidated -
+    // after a reload, say. `ask` calls `#send` outside any promise, so a throw
+    // escaping here lands in a click handler that has already started the
+    // spinner, which is precisely how the original bug became a hang.
+    const ports: FakePanelPort[] = [];
+    let refuse = false;
+    const client = new PortClient(() => {
+      if (refuse) throw new Error('Extension context invalidated.');
+      const port = new FakePanelPort();
+      ports.push(port);
+      return port;
+    });
+    // The worker goes away, and then reconnecting is refused too.
+    ports[0]!.stopWorker();
+    refuse = true;
+
+    let failure: AppError | null = null;
+    expect(() =>
+      client.ask(askRequest(), {
+        onDelta: () => undefined,
+        onStarted: () => undefined,
+        onThinking: () => undefined,
+        onDone: () => undefined,
+        onError: (error) => void (failure = error),
+      }),
+    ).not.toThrow();
+    expect(failure).not.toBeNull();
+    expect(client.inFlight).toBe(0);
+  });
+
   it('does not leak a handler per turn across a long session', async () => {
     const { client, ports } = clientOverFakes();
 
