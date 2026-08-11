@@ -190,7 +190,16 @@ export type ErrorCode =
   | 'claude-usage-limit'
   | 'claude-cli-failed'
   | 'aborted'
-  | 'no-context';
+  | 'no-context'
+  /**
+   * The service worker went away while this request was in flight.
+   *
+   * Chrome stops an idle MV3 worker, which is normal and not a failure of
+   * anything - but the run it was hosting is gone with it. The panel reconnects
+   * for the *next* request; this code exists so the one that was interrupted
+   * says so instead of spinning. See `src/panel/port-client.ts`.
+   */
+  | 'worker-restarted';
 
 export interface Remedy {
   label: string;

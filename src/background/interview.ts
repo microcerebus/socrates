@@ -17,13 +17,30 @@ import { buildSystemPrompt } from '../prompt/system-prompt.ts';
 import type { AskRequest } from '../shared/protocol.ts';
 import type { ModelId } from '../shared/types.ts';
 import type { ApiMessage, ProviderStream } from './providers.ts';
+import { MAX_TURN_CHARS, TRUNCATION_MARKER } from './transcript-store.ts';
 
-const MAX_HISTORY_TURNS = 12;
+export const MAX_HISTORY_TURNS = 12;
+
+/**
+ * The most of one earlier turn that is worth re-sending.
+ *
+ * The window bounds how *many* turns ride along; this bounds how big one of them
+ * can be, which the window alone does not. `history` comes from the panel's
+ * in-memory transcript rather than from storage, so nothing between the model
+ * writing a long reply and it being resent twelve more times clamps it -
+ * `transcript-store.ts` only truncates on the way to disk. Matching its
+ * `MAX_TURN_CHARS` keeps what the model is shown and what was saved the same
+ * shape, and makes the per-turn payload provably bounded.
+ */
+export const MAX_HISTORY_TURN_CHARS = MAX_TURN_CHARS;
 
 export function toApiMessages(request: AskRequest): ApiMessage[] {
   const history = request.history.slice(-MAX_HISTORY_TURNS).map<ApiMessage>((turn) => ({
     role: turn.role,
-    content: turn.text,
+    content:
+      turn.text.length <= MAX_HISTORY_TURN_CHARS
+        ? turn.text
+        : turn.text.slice(0, MAX_HISTORY_TURN_CHARS) + TRUNCATION_MARKER,
   }));
 
   // The API requires the first message to be `user`.
