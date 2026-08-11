@@ -369,6 +369,29 @@ describe('what counts as a host response', () => {
       expect(isHostResponse(value), `${JSON.stringify(value)} was accepted`).toBe(false);
     }
   });
+
+  it('checks the payload, not just the kind: the panel reads these fields directly', () => {
+    for (const value of [
+      { ok: true, kind: 'claude-delta', requestId: 'r' },
+      { ok: true, kind: 'claude-delta', requestId: 'r', text: 42 },
+      { ok: true, kind: 'claude-delta', text: 'x' },
+      { ok: true, kind: 'claude-done' },
+      { ok: true, kind: 'claude-ok', claudePath: null, account: null, subscription: null },
+      { ok: true, kind: 'pong', claudePath: 7 },
+    ]) {
+      expect(isHostResponse(value), `${JSON.stringify(value)} was accepted`).toBe(false);
+    }
+    expect(isHostResponse({ ok: true, kind: 'pong', claudePath: null })).toBe(true);
+    expect(
+      isHostResponse({
+        ok: true,
+        kind: 'claude-ok',
+        claudePath: '/opt/bin/claude',
+        account: null,
+        subscription: 'max',
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('running an interview turn over the Claude Code transport', () => {

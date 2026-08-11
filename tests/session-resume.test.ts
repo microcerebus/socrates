@@ -393,6 +393,20 @@ describe('discarding a session', () => {
     expect(saved).toHaveLength(0);
   });
 
+  /*
+   * "Clear all saved data" has the same problem as "start fresh", one step
+   * bigger: the panel is still holding a live session for the problem on screen,
+   * so a finishing turn or a `pagehide` would put the transcript the user just
+   * deleted straight back on disk. The panel discards the active slug in the same
+   * tick as the click, before the clear round trip starts.
+   */
+  it('refuses the save that would recreate a transcript just cleared', () => {
+    const { writer: w, saved } = writer();
+    w.discard('two-sum');
+    w.save(session({ rung: 3, deepestRung: 3 }));
+    expect(saved).toHaveLength(0);
+  });
+
   it('refuses it synchronously, before the clear round trip has settled', () => {
     let releaseClear = (): void => undefined;
     const saved: StoredSession[] = [];

@@ -620,8 +620,8 @@ export function App(): ReactNode {
    * write synchronously, in this same tick, and keeps refusing until a new turn
    * begins for the slug.
    */
-  const onStartFresh = (session: StoredSession): void => {
-    sessionWriter.discard(session.slug);
+  const resetSession = (slug: string): void => {
+    sessionWriter.discard(slug);
     const startedAt = Date.now();
     setTurns([]);
     setRung(0);
@@ -648,21 +648,23 @@ export function App(): ReactNode {
   };
 
   /*
-   * Clearing is not just a storage call: the panel is holding a view of what was
-   * just deleted. The attempt strip and any resume offer have to go with it, or
-   * the user is told their history is gone while still looking at it.
+   * Clearing is not just a storage call: the panel is *holding* a live session
+   * for the problem on screen, and every route that writes one is still armed.
+   * A finishing turn, a `pagehide`, or an attempt upsert would put the transcript
+   * the user just deleted straight back on disk - so the live session is
+   * discarded and reset first, in this same tick, exactly as "start fresh" does.
+   * Deleting everything really does mean everything, including the sitting in
+   * progress; the button says so and says there is no undo.
    */
-  const onClearAllData = (): Promise<void> =>
-    client
-      .clearAllData()
-      .then(() => {
-        setAllAttempts([]);
-        setResumable(null);
-      })
-      .catch((failure: AppError) => {
-        setError(failure);
-        throw failure;
-      });
+  const onClearAllData = (): Promise<void> => {
+    const slug = snapshot?.problem.slug ?? null;
+    if (slug !== null) resetSession(slug);
+    setAllAttempts([]);
+    return client.clearAllData().catch((failure: AppError) => {
+      setError(failure);
+      throw failure;
+    });
+  };
 
   const onProbeClaude = (): void => {
     setClaudeState('checking');
@@ -738,7 +740,7 @@ export function App(): ReactNode {
             <ResumeOffer
               session={resumable}
               onResume={() => onResume(resumable)}
-              onStartFresh={() => onStartFresh(resumable)}
+              onStartFresh={() => resetSession(resumable.slug)}
             />
           ) : null}
           <Transcript

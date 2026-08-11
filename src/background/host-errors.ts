@@ -51,15 +51,32 @@ const REMEDIES: Partial<Record<HostFailureCode, { label: string; command: string
   'claude-cli-failed': { label: 'Run this to check', command: CLAUDE_STATUS_COMMAND },
 };
 
-/** The frame kinds the panel side of the port knows how to read. */
-const OK_KINDS = new Set([
-  'pong',
-  'claude-ok',
-  'claude-started',
-  'claude-thinking',
-  'claude-delta',
-  'claude-done',
-]);
+type Record_ = Record<string, unknown>;
+
+const isString = (value: unknown): boolean => typeof value === 'string';
+const isNullableString = (value: unknown): boolean => value === null || isString(value);
+const hasRequestId = (frame: Record_): boolean => isString(frame['requestId']);
+
+/**
+ * The frames the panel side of the port knows how to read, and what each one has
+ * to carry.
+ *
+ * Checking the payload and not just the discriminant is the difference between a
+ * malformed frame being rejected here and its fields being handed to the panel:
+ * `claude-code.ts` reads `text` straight into the transcript and `requestId`
+ * decides which turn a frame belongs to.
+ */
+const OK_SHAPES: Record<string, (frame: Record_) => boolean> = {
+  pong: (frame) => isNullableString(frame['claudePath']),
+  'claude-ok': (frame) =>
+    isString(frame['claudePath']) &&
+    isNullableString(frame['account']) &&
+    isNullableString(frame['subscription']),
+  'claude-started': hasRequestId,
+  'claude-thinking': hasRequestId,
+  'claude-delta': (frame) => hasRequestId(frame) && isString(frame['text']),
+  'claude-done': hasRequestId,
+};
 
 const FAILURE_CODES = new Set<string>(Object.keys(CODE_MAP));
 
@@ -75,8 +92,10 @@ export function hostFailureToAppError(response: Extract<HostResponse, { ok: fals
 export function isHostResponse(value: unknown): value is HostResponse {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
-  if (record['ok'] === true)
-    return typeof record['kind'] === 'string' && OK_KINDS.has(record['kind']);
+  if (record['ok'] === true) {
+    const kind = record['kind'];
+    return typeof kind === 'string' && (OK_SHAPES[kind]?.(record) ?? false);
+  }
   if (record['ok'] === false)
     return isHostFailureCode(record['code']) && typeof record['message'] === 'string';
   return false;
