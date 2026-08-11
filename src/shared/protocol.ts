@@ -61,7 +61,13 @@ export type WorkerFrame =
   | { id: number; kind: 'attempts'; attempts: AttemptRecord[] }
   /** `null` when there is nothing stored for that slug. */
   | { id: number; kind: 'session'; session: StoredSession | null }
-  | { id: number; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
+  | {
+      id: number;
+      kind: 'claude-ok';
+      claudePath: string;
+      account: string | null;
+      subscription: string | null;
+    }
   | { id: number; kind: 'host-info'; claudePath: string | null }
   | { id: number; kind: 'ack' }
   | { id: number; kind: 'error'; error: AppError };

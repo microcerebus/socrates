@@ -16,7 +16,10 @@ export default tseslint.config(
       // The house rule: `any` is banned, not warned about.
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       'no-console': ['error', { allow: ['warn', 'error'] }],
       eqeqeq: ['error', 'smart'],
     },

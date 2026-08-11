@@ -27,7 +27,11 @@ export const DEFAULT_CONFIG: HostConfig = {
  * fallback-chain idea as the LeetCode selectors: `~/.local/bin` is where the
  * native installer puts it, then Homebrew, then a manual /usr/local install.
  */
-export const CLAUDE_FALLBACK_PATHS = ['.local/bin/claude', '/opt/homebrew/bin/claude', '/usr/local/bin/claude'];
+export const CLAUDE_FALLBACK_PATHS = [
+  '.local/bin/claude',
+  '/opt/homebrew/bin/claude',
+  '/usr/local/bin/claude',
+];
 
 function readString(record: Record<string, unknown>, key: string, fallback: string): string {
   const value = record[key];
@@ -68,7 +72,9 @@ export function resolveClaudePath(
 ): ClaudePathLookup {
   const candidates: string[] = [];
   const add = (candidate: string): void => {
-    const absolute = candidate.startsWith('/') ? candidate : `${home.replace(/\/$/, '')}/${candidate}`;
+    const absolute = candidate.startsWith('/')
+      ? candidate
+      : `${home.replace(/\/$/, '')}/${candidate}`;
     if (!candidates.includes(absolute)) candidates.push(absolute);
   };
 

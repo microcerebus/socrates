@@ -108,7 +108,7 @@ export const RUNGS: readonly RungSpec[] = [
       'More than one question - a barrage of questions is a disguised outline.',
     ],
     reviewPolicy:
-      "Say whether the code is correct on its own terms and whether it matches the contract. You may say the complexity is worse than the target, but not what would fix it.",
+      'Say whether the code is correct on its own terms and whether it matches the contract. You may say the complexity is worse than the target, but not what would fix it.',
   },
   {
     id: 2,
@@ -157,12 +157,12 @@ export const RUNGS: readonly RungSpec[] = [
     countsAsHint: true,
     reveals: [
       'Pseudocode: the loop structure, the state, the update rule, and the invariant that makes it correct.',
-      'Idioms of the user\'s language so it reads naturally to them, without being a submittable solution.',
+      "Idioms of the user's language so it reads naturally to them, without being a submittable solution.",
       'Where the edge cases are handled and why.',
     ],
     withholds: [
       'A complete, runnable, copy-pasteable solution.',
-      'A full line-by-line rewrite of the user\'s code.',
+      "A full line-by-line rewrite of the user's code.",
     ],
     reviewPolicy:
       "Map the user's code onto the pseudocode and point at the lines that diverge. Describe the fix precisely; still stop short of handing over the finished function.",
@@ -180,9 +180,7 @@ export const RUNGS: readonly RungSpec[] = [
       "A review of the user's own code against that solution: what they got right, what breaks, and the smallest change that would have got them there.",
       'The idea to remember for next time, in one sentence.',
     ],
-    withholds: [
-      'Nothing is withheld at this rung. Be complete and be kind.',
-    ],
+    withholds: ['Nothing is withheld at this rung. Be complete and be kind.'],
     reviewPolicy: 'Full line-level review against the reference solution.',
   },
 ];

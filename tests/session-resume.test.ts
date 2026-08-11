@@ -40,7 +40,8 @@ import { SNAPSHOT } from './helpers.ts';
  */
 function stubChrome(): Record<string, unknown> {
   const store: Record<string, unknown> = {};
-  const later = <T>(value: T): Promise<T> => new Promise((resolve) => setTimeout(() => resolve(value), 0));
+  const later = <T>(value: T): Promise<T> =>
+    new Promise((resolve) => setTimeout(() => resolve(value), 0));
   (globalThis as { chrome?: unknown }).chrome = {
     storage: {
       local: {
@@ -72,7 +73,10 @@ function session(overrides: Partial<StoredSession> = {}): StoredSession {
     elapsedMs: 8 * 60_000,
     rung: 2,
     deepestRung: 2,
-    turns: [turn('user', 'is it about pairs?', 1), turn('assistant', 'what does the order buy you?', 1)],
+    turns: [
+      turn('user', 'is it about pairs?', 1),
+      turn('assistant', 'what does the order buy you?', 1),
+    ],
     ...overrides,
   };
 }
@@ -110,7 +114,9 @@ describe('restoring a session', () => {
     await saveSession(session({ rung: 1, deepestRung: 1 }));
     const first = await getSession('two-sum');
 
-    await saveSession(session({ rung: 3, deepestRung: 3, startedAt: first?.startedAt ?? '', updatedAt: 2_000 }));
+    await saveSession(
+      session({ rung: 3, deepestRung: 3, startedAt: first?.startedAt ?? '', updatedAt: 2_000 }),
+    );
     const second = await getSession('two-sum');
 
     expect(second?.startedAt).toBe(first?.startedAt);
@@ -134,7 +140,14 @@ describe('restoring a session', () => {
 
   it('keeps sessions apart by problem', async () => {
     await saveSession(session());
-    await saveSession(session({ slug: 'valid-parentheses', title: '20. Valid Parentheses', rung: 5, deepestRung: 5 }));
+    await saveSession(
+      session({
+        slug: 'valid-parentheses',
+        title: '20. Valid Parentheses',
+        rung: 5,
+        deepestRung: 5,
+      }),
+    );
     expect((await getSession('two-sum'))?.rung).toBe(2);
     expect((await getSession('valid-parentheses'))?.rung).toBe(5);
   });
@@ -164,21 +177,27 @@ describe('surviving what is already on disk', () => {
 
 describe('the storage bounds', () => {
   it('truncates a single runaway turn rather than storing it whole', () => {
-    const huge = normaliseSession(session({ turns: [turn('assistant', 'x'.repeat(MAX_TURN_CHARS * 3), 5)] }));
+    const huge = normaliseSession(
+      session({ turns: [turn('assistant', 'x'.repeat(MAX_TURN_CHARS * 3), 5)] }),
+    );
     const text = huge.turns[0]?.text ?? '';
     expect(text.length).toBeLessThan(MAX_TURN_CHARS * 3);
     expect(text).toContain(TRUNCATION_MARKER.trim());
   });
 
   it('caps the number of turns, keeping the newest', () => {
-    const many = Array.from({ length: MAX_TURNS_PER_SESSION + 20 }, (_, i) => turn('user', `turn ${i}`, 0));
+    const many = Array.from({ length: MAX_TURNS_PER_SESSION + 20 }, (_, i) =>
+      turn('user', `turn ${i}`, 0),
+    );
     const capped = normaliseSession(session({ turns: many }));
     expect(capped.turns).toHaveLength(MAX_TURNS_PER_SESSION);
     expect(capped.turns.at(-1)?.text).toBe(`turn ${many.length - 1}`);
   });
 
   it('caps the total size by dropping the oldest turns, not the newest', () => {
-    const big = Array.from({ length: 20 }, (_, i) => turn('assistant', `${i}:${'y'.repeat(5_000)}`, 3));
+    const big = Array.from({ length: 20 }, (_, i) =>
+      turn('assistant', `${i}:${'y'.repeat(5_000)}`, 3),
+    );
     const capped = normaliseSession(session({ turns: big }));
     const total = capped.turns.reduce((sum, t) => sum + t.text.length, 0);
     expect(total).toBeLessThanOrEqual(MAX_SESSION_CHARS);
@@ -186,7 +205,9 @@ describe('the storage bounds', () => {
   });
 
   it('keeps at least the last turn even if that one turn is over the total cap', () => {
-    const capped = normaliseSession(session({ turns: [turn('assistant', 'z'.repeat(MAX_TURN_CHARS), 5)] }));
+    const capped = normaliseSession(
+      session({ turns: [turn('assistant', 'z'.repeat(MAX_TURN_CHARS), 5)] }),
+    );
     expect(capped.turns).toHaveLength(1);
   });
 
@@ -209,7 +230,9 @@ describe('the storage bounds', () => {
   });
 
   it('enforces the bounds on the way to storage, not just in the helper', async () => {
-    const many = Array.from({ length: MAX_TURNS_PER_SESSION + 50 }, (_, i) => turn('user', `turn ${i}`, 0));
+    const many = Array.from({ length: MAX_TURNS_PER_SESSION + 50 }, (_, i) =>
+      turn('user', `turn ${i}`, 0),
+    );
     await saveSession(session({ turns: many }));
     expect((await getSession('two-sum'))?.turns).toHaveLength(MAX_TURNS_PER_SESSION);
   });
@@ -218,9 +241,15 @@ describe('the storage bounds', () => {
     for (let i = 0; i < MAX_SESSIONS + 10; i += 1) {
       await saveSession(session({ slug: `p-${i}`, updatedAt: i }));
     }
-    const stored = (globalThis as { chrome: { storage: { local: { get(key: string): Promise<Record<string, unknown>> } } } })
-      .chrome.storage.local;
-    const record = (await stored.get('socrates:sessions'))['socrates:sessions'] as Record<string, unknown>;
+    const stored = (
+      globalThis as {
+        chrome: { storage: { local: { get(key: string): Promise<Record<string, unknown>> } } };
+      }
+    ).chrome.storage.local;
+    const record = (await stored.get('socrates:sessions'))['socrates:sessions'] as Record<
+      string,
+      unknown
+    >;
     expect(Object.keys(record)).toHaveLength(MAX_SESSIONS);
   });
 
@@ -261,7 +290,10 @@ describe('overlapping mutations', () => {
     await saveSession(session({ slug: 'lru-cache' }));
 
     // "Start fresh" on one problem while a save for another is still landing.
-    await Promise.all([clearSession('two-sum'), saveSession(session({ slug: 'lru-cache', rung: 2 }))]);
+    await Promise.all([
+      clearSession('two-sum'),
+      saveSession(session({ slug: 'lru-cache', rung: 2 })),
+    ]);
 
     expect(await getSession('two-sum')).toBeNull();
     expect((await getSession('lru-cache'))?.rung).toBe(2);
@@ -269,7 +301,8 @@ describe('overlapping mutations', () => {
 
   it('does not resurrect anything when a clear overlaps a prune', async () => {
     // Fill past the cap so the next save prunes, then clear while it does.
-    for (let i = 0; i < MAX_SESSIONS; i += 1) await saveSession(session({ slug: `p-${i}`, updatedAt: 1_000 + i }));
+    for (let i = 0; i < MAX_SESSIONS; i += 1)
+      await saveSession(session({ slug: `p-${i}`, updatedAt: 1_000 + i }));
 
     await Promise.all([
       clearSession('p-5'),
@@ -520,7 +553,10 @@ describe('a capture overtaken by a navigation', () => {
   }
 
   function writer(): ReturnType<typeof createSessionWriter> {
-    return createSessionWriter({ save: () => Promise.resolve(null), clear: () => Promise.resolve(null) });
+    return createSessionWriter({
+      save: () => Promise.resolve(null),
+      clear: () => Promise.resolve(null),
+    });
   }
 
   it('counts a move to another problem, but not re-adopting the same one', () => {
@@ -537,7 +573,10 @@ describe('a capture overtaken by a navigation', () => {
   it('passes a capture through when nothing moved', async () => {
     const w = writer();
     w.setActive('two-sum');
-    expect(await w.ifStillCurrent(() => Promise.resolve(SNAPSHOT))).toEqual({ current: true, value: SNAPSHOT });
+    expect(await w.ifStillCurrent(() => Promise.resolve(SNAPSHOT))).toEqual({
+      current: true,
+      value: SNAPSHOT,
+    });
   });
 
   /* The blocker: navigate while the capture is outstanding. */
@@ -575,13 +614,18 @@ describe('a capture overtaken by a navigation', () => {
   it('distinguishes an unreadable page from a stale one', async () => {
     const w = writer();
     w.setActive('two-sum');
-    expect(await w.ifStillCurrent(() => Promise.resolve(null))).toEqual({ current: true, value: null });
+    expect(await w.ifStillCurrent(() => Promise.resolve(null))).toEqual({
+      current: true,
+      value: null,
+    });
   });
 
   it('lets a rejection through rather than disguising it as staleness', async () => {
     const w = writer();
     w.setActive('two-sum');
-    await expect(w.ifStillCurrent(() => Promise.reject(new Error('port died')))).rejects.toThrow('port died');
+    await expect(w.ifStillCurrent(() => Promise.reject(new Error('port died')))).rejects.toThrow(
+      'port died',
+    );
   });
 
   it('keeps guarding reads issued after the navigation', async () => {
@@ -589,7 +633,10 @@ describe('a capture overtaken by a navigation', () => {
     w.setActive('two-sum');
     w.setActive('lru-cache');
     // Issued on lru-cache and resolving on lru-cache: perfectly current.
-    expect(await w.ifStillCurrent(() => Promise.resolve('ok'))).toEqual({ current: true, value: 'ok' });
+    expect(await w.ifStillCurrent(() => Promise.resolve('ok'))).toEqual({
+      current: true,
+      value: 'ok',
+    });
   });
 });
 
@@ -606,7 +653,10 @@ describe('a capture overtaken by a navigation', () => {
  * against both resolution orders.
  */
 describe('rapid navigation with out-of-order resolutions', () => {
-  const page = (slug: string): PageSnapshot => ({ ...SNAPSHOT, problem: { ...SNAPSHOT.problem, slug } });
+  const page = (slug: string): PageSnapshot => ({
+    ...SNAPSHOT,
+    problem: { ...SNAPSHOT.problem, slug },
+  });
 
   /**
    * The follower from `App.tsx`, with React removed: read, drop if stale,
@@ -630,7 +680,10 @@ describe('rapid navigation with out-of-order resolutions', () => {
   }
 
   /** A page that reports a queue of values, then whatever it settled on. */
-  function pageReader(queue: (PageSnapshot | null)[], settled: PageSnapshot): () => Promise<PageSnapshot | null> {
+  function pageReader(
+    queue: (PageSnapshot | null)[],
+    settled: PageSnapshot,
+  ): () => Promise<PageSnapshot | null> {
     return () => Promise.resolve(queue.length > 0 ? (queue.shift() ?? null) : settled);
   }
 
@@ -640,7 +693,10 @@ describe('rapid navigation with out-of-order resolutions', () => {
     adopted: string[];
   } {
     const adopted: string[] = [];
-    const w = createSessionWriter({ save: () => Promise.resolve(null), clear: () => Promise.resolve(null) });
+    const w = createSessionWriter({
+      save: () => Promise.resolve(null),
+      clear: () => Promise.resolve(null),
+    });
     return {
       writer: w,
       adopted,

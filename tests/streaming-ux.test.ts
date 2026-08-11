@@ -19,7 +19,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseClaudeLine } from '../src/native-host/claude.ts';
 import { DEFAULT_CONFIG, parseConfig } from '../src/native-host/config.ts';
 import type { HostResponse } from '../src/native-host/protocol.ts';
-import { THINKING_PULSE_MS, startClaudeRun, type ClaudeRunDeps } from '../src/native-host/runner.ts';
+import {
+  THINKING_PULSE_MS,
+  startClaudeRun,
+  type ClaudeRunDeps,
+} from '../src/native-host/runner.ts';
 import {
   IDLE_PROGRESS,
   STALL_AFTER_MS,
@@ -40,7 +44,9 @@ describe('parsing the stream the CLI actually emits', () => {
   const frame = (value: unknown): string => JSON.stringify(value);
 
   it('treats the init frame as the end of the connecting phase', () => {
-    expect(parseClaudeLine(frame({ type: 'system', subtype: 'init', model: 'claude-sonnet-5' }))).toEqual({
+    expect(
+      parseClaudeLine(frame({ type: 'system', subtype: 'init', model: 'claude-sonnet-5' })),
+    ).toEqual({
       kind: 'started',
     });
   });
@@ -54,7 +60,10 @@ describe('parsing the stream the CLI actually emits', () => {
       parseClaudeLine(
         frame({
           type: 'stream_event',
-          event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'the answer is 42' } },
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: 'the answer is 42' },
+          },
         }),
       ),
     ).toEqual({ kind: 'thinking' });
@@ -70,7 +79,10 @@ describe('parsing the stream the CLI actually emits', () => {
     const event = parseClaudeLine(
       frame({
         type: 'stream_event',
-        event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'use a hash map' } },
+        event: {
+          type: 'content_block_delta',
+          delta: { type: 'thinking_delta', thinking: 'use a hash map' },
+        },
       }),
     );
     expect(event).toEqual({ kind: 'thinking' });
@@ -80,7 +92,10 @@ describe('parsing the stream the CLI actually emits', () => {
   it('still reads text deltas as the reply', () => {
     expect(
       parseClaudeLine(
-        frame({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hi' } } }),
+        frame({
+          type: 'stream_event',
+          event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hi' } },
+        }),
       ),
     ).toEqual({ kind: 'text', text: 'hi' });
   });
@@ -114,9 +129,18 @@ describe('liveness from a real child process', { timeout: 30_000 }, () => {
   function collect(scenario: string, deps: ClaudeRunDeps): Promise<HostResponse[]> {
     return new Promise((resolvePromise, rejectPromise) => {
       const frames: HostResponse[] = [];
-      const timer = setTimeout(() => rejectPromise(new Error(`${scenario} never finished`)), 20_000);
+      const timer = setTimeout(
+        () => rejectPromise(new Error(`${scenario} never finished`)),
+        20_000,
+      );
       startClaudeRun(
-        { kind: 'claude-start', requestId: 'req-1', model: scenario, system: 'SYSTEM', prompt: 'PROMPT' },
+        {
+          kind: 'claude-start',
+          requestId: 'req-1',
+          model: scenario,
+          system: 'SYSTEM',
+          prompt: 'PROMPT',
+        },
         deps,
         (frame) => {
           frames.push(frame);
@@ -149,7 +173,10 @@ describe('liveness from a real child process', { timeout: 30_000 }, () => {
    */
   it('throttles the heartbeat instead of forwarding every thinking delta', async () => {
     let clock = 0;
-    const frames = await collect('scenario-long-think', runDeps({ now: () => (clock += 100), pulseMs: 700 }));
+    const frames = await collect(
+      'scenario-long-think',
+      runDeps({ now: () => (clock += 100), pulseMs: 700 }),
+    );
     const pulses = frames.filter((frame) => frame.ok && frame.kind === 'claude-thinking');
     expect(pulses.length).toBeGreaterThan(0);
     expect(pulses.length).toBeLessThan(10);
@@ -157,7 +184,10 @@ describe('liveness from a real child process', { timeout: 30_000 }, () => {
 
   it('keeps pulsing when the clock really moves, so a long think never looks frozen', async () => {
     let clock = 0;
-    const frames = await collect('scenario-long-think', runDeps({ now: () => (clock += 5_000), pulseMs: 700 }));
+    const frames = await collect(
+      'scenario-long-think',
+      runDeps({ now: () => (clock += 5_000), pulseMs: 700 }),
+    );
     const pulses = frames.filter((frame) => frame.ok && frame.kind === 'claude-thinking');
     expect(pulses.length).toBeGreaterThan(5);
   });
@@ -170,7 +200,7 @@ describe('liveness from a real child process', { timeout: 30_000 }, () => {
     expect(after.some((frame) => frame.ok && frame.kind === 'claude-thinking')).toBe(false);
   });
 
-  it('has a pulse floor that is well inside the panel\'s stall window', () => {
+  it("has a pulse floor that is well inside the panel's stall window", () => {
     expect(THINKING_PULSE_MS).toBeLessThan(STALL_AFTER_MS / 10);
   });
 });
@@ -221,7 +251,8 @@ describe('the phases of a turn', () => {
 
 describe('the stall detector', () => {
   const T0 = 1_000_000;
-  const thinkingSince = (at: number): ReturnType<typeof beginTurn> => applyEvent(beginTurn(T0), 'thinking', at);
+  const thinkingSince = (at: number): ReturnType<typeof beginTurn> =>
+    applyEvent(beginTurn(T0), 'thinking', at);
 
   it('calls a normal gap between heartbeats live', () => {
     const progress = thinkingSince(T0 + 1_000);

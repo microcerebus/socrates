@@ -73,15 +73,24 @@ export function startClaudeRun(
     return () => undefined;
   }
 
-  const child = deps.spawn(lookup.path, claudeArgs({ model: request.model, system: request.system }), {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    cwd: deps.cwd,
-    env: { ...process.env, ...CLAUDE_ENV },
-  });
+  const child = deps.spawn(
+    lookup.path,
+    claudeArgs({ model: request.model, system: request.system }),
+    {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: deps.cwd,
+      env: { ...process.env, ...CLAUDE_ENV },
+    },
+  );
 
   const splitter = new LineSplitter();
   let rateLimit: RateLimitState | null = null;
-  let result: { isError: boolean; message: string; apiErrorStatus: number | null; subtype: string } | null = null;
+  let result: {
+    isError: boolean;
+    message: string;
+    apiErrorStatus: number | null;
+    subtype: string;
+  } | null = null;
   let sawText = false;
   let sawStarted = false;
   let cancelled = false;
@@ -176,11 +185,14 @@ export function startClaudeRun(
      * alongside subtypes that carry no reply at all.
      */
     const fallbackText =
-      !sawText && outcome !== null && outcome.subtype === ASSISTANT_RESULT_SUBTYPE ? outcome.message : '';
+      !sawText && outcome !== null && outcome.subtype === ASSISTANT_RESULT_SUBTYPE
+        ? outcome.message
+        : '';
     const haveReply = sawText || fallbackText !== '';
 
     if (spawnErrorCode === undefined && outcome !== null && !outcome.isError && haveReply) {
-      if (fallbackText !== '') emit({ ok: true, kind: 'claude-delta', requestId, text: fallbackText });
+      if (fallbackText !== '')
+        emit({ ok: true, kind: 'claude-delta', requestId, text: fallbackText });
       emit({ ok: true, kind: 'claude-done', requestId });
       return;
     }

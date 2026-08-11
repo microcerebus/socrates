@@ -30,7 +30,13 @@ import { PortClient, type ClaudeAccess, type HostInfo } from './port-client.ts';
 import { classifyCapture } from './problem-switch.ts';
 import { createSessionWriter, type Current } from './session-writer.ts';
 import { createSettingsWriter } from './settings-writer.ts';
-import { IDLE_PROGRESS, TIMEOUT_AFTER_MS, applyEvent, beginTurn, type TurnProgress } from './turn-progress.ts';
+import {
+  IDLE_PROGRESS,
+  TIMEOUT_AFTER_MS,
+  applyEvent,
+  beginTurn,
+  type TurnProgress,
+} from './turn-progress.ts';
 import { REVEAL_WINDOW_MS, createTypewriter, type Typewriter } from './typewriter.ts';
 
 /** How often the clock the panel renders from advances. */
@@ -111,7 +117,12 @@ export function App(): ReactNode {
   // Holds the settings intent across renders, so a change is a patch against the
   // newest one rather than against whatever this render closed over.
   const settingsWriter = useMemo(
-    () => createSettingsWriter({ save: (next) => client.setSettings(next), onSettings: setSettings, onError: setError }),
+    () =>
+      createSettingsWriter({
+        save: (next) => client.setSettings(next),
+        onSettings: setSettings,
+        onError: setError,
+      }),
     [client],
   );
 
@@ -119,7 +130,11 @@ export function App(): ReactNode {
   // and the re-render cannot write a thrown-away session back. See
   // `session-writer.ts`.
   const sessionWriter = useMemo(
-    () => createSessionWriter({ save: (next) => client.saveSession(next), clear: (slug) => client.clearSession(slug) }),
+    () =>
+      createSessionWriter({
+        save: (next) => client.saveSession(next),
+        clear: (slug) => client.clearSession(slug),
+      }),
     [client],
   );
 
@@ -179,7 +194,8 @@ export function App(): ReactNode {
       void sessionWriter
         .ifStillCurrent(() => client.getSession(slug))
         .then((result) => {
-          if (result.current && result.value && result.value.turns.length > 0) setResumable(result.value);
+          if (result.current && result.value && result.value.turns.length > 0)
+            setResumable(result.value);
         })
         .catch(() => undefined);
     },
@@ -295,7 +311,17 @@ export function App(): ReactNode {
       loadAttempts(next.problem.slug);
       offerResume(next.problem.slug);
     },
-    [attemptStartedAt, deepestRung, loadAttempts, offerResume, rung, sessionStart, sessionWriter, snapshot, turns],
+    [
+      attemptStartedAt,
+      deepestRung,
+      loadAttempts,
+      offerResume,
+      rung,
+      sessionStart,
+      sessionWriter,
+      snapshot,
+      turns,
+    ],
   );
 
   /**
@@ -387,7 +413,10 @@ export function App(): ReactNode {
         deepestRung: deepest,
         hintsUsed: hintsUsedFor(deepest),
       };
-      void client.recordAttempt(attempt).then(setAllAttempts).catch(() => undefined);
+      void client
+        .recordAttempt(attempt)
+        .then(setAllAttempts)
+        .catch(() => undefined);
     },
     [attemptStartedAt, client, sessionStart],
   );
@@ -457,7 +486,9 @@ export function App(): ReactNode {
       // The new message rides inside the context block, so history holds only the
       // turns before it - otherwise the model sees the same text twice.
       const withUser: Turn[] =
-        message.trim() === '' ? turns : [...turns, { role: 'user', text: message, rung: targetRung }];
+        message.trim() === ''
+          ? turns
+          : [...turns, { role: 'user', text: message, rung: targetRung }];
       if (withUser !== turns) setTurns(withUser);
 
       const request: AskRequest = {
@@ -520,7 +551,20 @@ export function App(): ReactNode {
         },
       });
     },
-    [client, deepestRung, pace, persistAttempt, reducedMotion, saveSession, sessionStart, sessionWriter, snapshot, snapshotForTurn, stopPacing, turns],
+    [
+      client,
+      deepestRung,
+      pace,
+      persistAttempt,
+      reducedMotion,
+      saveSession,
+      sessionStart,
+      sessionWriter,
+      snapshot,
+      snapshotForTurn,
+      stopPacing,
+      turns,
+    ],
   );
 
   /*
@@ -635,7 +679,8 @@ export function App(): ReactNode {
 
       {snapshot?.editor.source === 'unavailable' ? (
         <p className="notice notice-warn">
-          Your editor buffer could not be read, so code review is off. Paste your code instead if you want it reviewed.{' '}
+          Your editor buffer could not be read, so code review is off. Paste your code instead if
+          you want it reviewed.{' '}
           <button type="button" className="link" onClick={() => setShowPaste(true)}>
             paste
           </button>
@@ -704,7 +749,8 @@ export function App(): ReactNode {
               onCancel={() => cancelRef.current?.()}
             />
             <p className="small footnote">
-              {hintsUsedFor(rung)} of {TOTAL_HINTS} hints used · replies never go past the rung you unlocked
+              {hintsUsedFor(rung)} of {TOTAL_HINTS} hints used · replies never go past the rung you
+              unlocked
             </p>
           </footer>
         </>

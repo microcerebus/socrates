@@ -7,7 +7,8 @@ export const SNAPSHOT: PageSnapshot = {
     title: '1. Two Sum',
     url: 'https://leetcode.com/problems/two-sum/',
     difficulty: 'Easy',
-    statement: 'Given an array of integers nums and an integer target, return indices of the two numbers…',
+    statement:
+      'Given an array of integers nums and an integer target, return indices of the two numbers…',
     examples: ['Example 1:\nInput: nums = [2,7,11,15], target = 9\nOutput: [0,1]'],
     constraints: ['2 <= nums.length <= 10^4'],
     source: 'leetcode',
@@ -31,4 +32,3 @@ export function askRequest(overrides: Partial<AskRequest> = {}): AskRequest {
     ...overrides,
   };
 }
-

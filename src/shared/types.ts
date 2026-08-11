@@ -68,14 +68,10 @@ export interface PageSnapshot {
 
 /** Why a scrape failed. The panel maps these onto an actionable message. */
 export type ScrapeFailure =
-  | 'not-a-problem-page'
-  | 'no-problem-markup'
-  | 'no-statement'
-  | 'no-content-script';
+  'not-a-problem-page' | 'no-problem-markup' | 'no-statement' | 'no-content-script';
 
 export type ScrapeResult =
-  | { ok: true; snapshot: PageSnapshot }
-  | { ok: false; reason: ScrapeFailure; detail?: string };
+  { ok: true; snapshot: PageSnapshot } | { ok: false; reason: ScrapeFailure; detail?: string };
 
 export interface AttemptRecord {
   slug: string;

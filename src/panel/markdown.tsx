@@ -24,7 +24,8 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     } else if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
       nodes.push(<strong key={key}>{part.slice(2, -2)}</strong>);
     } else if (
-      ((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_'))) &&
+      ((part.startsWith('*') && part.endsWith('*')) ||
+        (part.startsWith('_') && part.endsWith('_'))) &&
       part.length > 2
     ) {
       nodes.push(<em key={key}>{part.slice(1, -1)}</em>);
@@ -52,7 +53,9 @@ function renderProse(source: string, keyPrefix: string): ReactNode[] {
       blocks.push(
         <ul key={key}>
           {lines.map((line, i) => (
-            <li key={`${key}-${i}`}>{renderInline(LIST_ITEM.exec(line)?.[1] ?? line, `${key}-${i}`)}</li>
+            <li key={`${key}-${i}`}>
+              {renderInline(LIST_ITEM.exec(line)?.[1] ?? line, `${key}-${i}`)}
+            </li>
           ))}
         </ul>,
       );
@@ -107,7 +110,10 @@ export function Markdown({ source }: { source: string }): ReactNode {
     const body = rest.slice(openFence + 3);
     const newline = body.indexOf('\n');
     nodes.push(
-      <pre key={`code-open-${index}`} data-language={newline === -1 ? 'text' : body.slice(0, newline) || 'text'}>
+      <pre
+        key={`code-open-${index}`}
+        data-language={newline === -1 ? 'text' : body.slice(0, newline) || 'text'}
+      >
         <code>{newline === -1 ? '' : body.slice(newline + 1)}</code>
       </pre>,
     );

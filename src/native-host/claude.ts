@@ -142,7 +142,11 @@ export type ClaudeEvent =
 
 interface StreamFrame {
   type?: unknown;
-  event?: { type?: unknown; delta?: { type?: unknown; text?: unknown }; content_block?: { type?: unknown } };
+  event?: {
+    type?: unknown;
+    delta?: { type?: unknown; text?: unknown };
+    content_block?: { type?: unknown };
+  };
   rate_limit_info?: { status?: unknown; resetsAt?: unknown };
   is_error?: unknown;
   result?: unknown;
@@ -200,7 +204,11 @@ export function parseClaudeLine(line: string): ClaudeEvent | null {
     const info = frame.rate_limit_info;
     const status = typeof info?.status === 'string' ? info.status : '';
     if (status === '') return null;
-    return { kind: 'rate-limit', status, resetsAt: typeof info?.resetsAt === 'number' ? info.resetsAt : null };
+    return {
+      kind: 'rate-limit',
+      status,
+      resetsAt: typeof info?.resetsAt === 'number' ? info.resetsAt : null,
+    };
   }
 
   if (frame.type === 'result') {
@@ -258,7 +266,8 @@ export function parseAuthStatus(stdout: string): AuthStatus | null {
   return {
     loggedIn: record['loggedIn'],
     account: typeof record['email'] === 'string' ? record['email'] : null,
-    subscription: typeof record['subscriptionType'] === 'string' ? record['subscriptionType'] : null,
+    subscription:
+      typeof record['subscriptionType'] === 'string' ? record['subscriptionType'] : null,
   };
 }
 
@@ -268,7 +277,10 @@ export interface RateLimitState {
 }
 
 /** `allowed` is the only status that means the window still has room in it. */
-export function isRateLimited(state: RateLimitState | null, apiErrorStatus: number | null): boolean {
+export function isRateLimited(
+  state: RateLimitState | null,
+  apiErrorStatus: number | null,
+): boolean {
   if (apiErrorStatus === 429) return true;
   return state !== null && state.status !== 'allowed';
 }

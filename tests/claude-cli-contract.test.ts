@@ -22,7 +22,10 @@ import { CLAUDE_LOGIN_COMMAND, claudeArgs, parseAuthStatus } from '../src/native
 
 function findClaude(): string | null {
   try {
-    const path = execFileSync('command', ['-v', 'claude'], { shell: '/bin/sh', encoding: 'utf8' }).trim();
+    const path = execFileSync('command', ['-v', 'claude'], {
+      shell: '/bin/sh',
+      encoding: 'utf8',
+    }).trim();
     return path === '' ? null : path;
   } catch {
     return null;
@@ -32,17 +35,24 @@ function findClaude(): string | null {
 const CLAUDE = findClaude();
 
 const capture = (args: string[]): string =>
-  execFileSync(CLAUDE as string, args, { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync(CLAUDE as string, args, {
+    encoding: 'utf8',
+    timeout: 30_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 
 describe.skipIf(CLAUDE === null)('claude CLI contract (integration)', () => {
   it('still accepts every flag the host passes', () => {
     const help = capture(['--help']);
-    const flags = claudeArgs({ model: 'claude-sonnet-5', system: 'x' }).filter((arg) => arg.startsWith('--'));
+    const flags = claudeArgs({ model: 'claude-sonnet-5', system: 'x' }).filter((arg) =>
+      arg.startsWith('--'),
+    );
 
     for (const flag of flags) {
-      expect(help, `claude --help no longer mentions ${flag}; src/native-host/claude.ts needs updating`).toContain(
-        flag,
-      );
+      expect(
+        help,
+        `claude --help no longer mentions ${flag}; src/native-host/claude.ts needs updating`,
+      ).toContain(flag);
     }
   });
 

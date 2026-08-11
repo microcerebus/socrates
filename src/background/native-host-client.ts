@@ -20,7 +20,10 @@ export type NativeSend = (name: string, message: HostRequest) => Promise<unknown
 const defaultSend: NativeSend = (name, message) =>
   chrome.runtime.sendNativeMessage(name, message) as Promise<unknown>;
 
-async function ask(send: NativeSend, request: HostRequest): Promise<Extract<HostResponse, { ok: true }>> {
+async function ask(
+  send: NativeSend,
+  request: HostRequest,
+): Promise<Extract<HostResponse, { ok: true }>> {
   let raw: unknown;
   try {
     raw = await send(NATIVE_HOST_NAME, request);
@@ -31,7 +34,8 @@ async function ask(send: NativeSend, request: HostRequest): Promise<Extract<Host
       [{ label: 'Run this from the repo root', command: INSTALL_COMMAND }],
     );
   }
-  if (!isHostResponse(raw)) throw appError('claude-cli-failed', 'The native helper returned something unexpected.');
+  if (!isHostResponse(raw))
+    throw appError('claude-cli-failed', 'The native helper returned something unexpected.');
   if (!raw.ok) throw hostFailureToAppError(raw);
   return raw;
 }
@@ -48,7 +52,8 @@ export interface HostInfo {
  */
 export async function getHostInfo(send: NativeSend = defaultSend): Promise<HostInfo> {
   const response = await ask(send, { kind: 'ping' });
-  if (response.kind !== 'pong') throw appError('claude-cli-failed', 'The native helper did not identify itself.');
+  if (response.kind !== 'pong')
+    throw appError('claude-cli-failed', 'The native helper did not identify itself.');
   return { claudePath: response.claudePath };
 }
 
@@ -64,5 +69,9 @@ export async function probeClaudeAccess(send: NativeSend = defaultSend): Promise
   if (response.kind !== 'claude-ok') {
     throw appError('claude-cli-failed', 'The native helper did not report on the Claude Code CLI.');
   }
-  return { claudePath: response.claudePath, account: response.account, subscription: response.subscription };
+  return {
+    claudePath: response.claudePath,
+    account: response.account,
+    subscription: response.subscription,
+  };
 }

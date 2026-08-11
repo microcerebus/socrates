@@ -11,12 +11,22 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { streamClaudeCode, type NativePort } from '../src/background/claude-code.ts';
 import { hostFailureToAppError } from '../src/background/host-errors.ts';
 import { runInterviewTurn } from '../src/background/interview.ts';
-import { claudeCodeProvider, flattenMessages, type ApiMessage } from '../src/background/providers.ts';
+import {
+  claudeCodeProvider,
+  flattenMessages,
+  type ApiMessage,
+} from '../src/background/providers.ts';
 import { getSettings, setSettings } from '../src/background/session-store.ts';
 import { createSettingsWriter } from '../src/panel/settings-writer.ts';
 import { WITHHELD_NOTICE } from '../src/prompt/spoiler-guard.ts';
 import type { HostResponse } from '../src/native-host/protocol.ts';
-import { DEFAULT_SETTINGS, appError, type AppError, type Rung, type Settings } from '../src/shared/types.ts';
+import {
+  DEFAULT_SETTINGS,
+  appError,
+  type AppError,
+  type Rung,
+  type Settings,
+} from '../src/shared/types.ts';
 import { askRequest } from './helpers.ts';
 
 // --- a native port that never leaves the process -----------------------------
@@ -27,8 +37,13 @@ class FakePort implements NativePort {
   #onMessage: ((message: unknown) => void)[] = [];
   #onDisconnect: (() => void)[] = [];
 
-  readonly onMessage = { addListener: (callback: (message: unknown) => void): void => void this.#onMessage.push(callback) };
-  readonly onDisconnect = { addListener: (callback: () => void): void => void this.#onDisconnect.push(callback) };
+  readonly onMessage = {
+    addListener: (callback: (message: unknown) => void): void =>
+      void this.#onMessage.push(callback),
+  };
+  readonly onDisconnect = {
+    addListener: (callback: () => void): void => void this.#onDisconnect.push(callback),
+  };
 
   postMessage(message: unknown): void {
     this.sent.push(message);
@@ -53,7 +68,10 @@ class FakePort implements NativePort {
 }
 
 /** `claude-code.ts` reads `chrome.runtime.lastError` on disconnect. */
-function stubChrome(): { store: Record<string, unknown>; setLastError(message: string | null): void } {
+function stubChrome(): {
+  store: Record<string, unknown>;
+  setLastError(message: string | null): void;
+} {
   const store: Record<string, unknown> = {};
   const runtime: { lastError?: { message: string } } = {};
   (globalThis as { chrome?: unknown }).chrome = {
@@ -177,7 +195,10 @@ describe('the streaming port', () => {
     const port = new FakePort();
     let started = 0;
     let thinking = 0;
-    const running = stream(port, { onStarted: () => (started += 1), onThinking: () => (thinking += 1) });
+    const running = stream(port, {
+      onStarted: () => (started += 1),
+      onThinking: () => (thinking += 1),
+    });
 
     port.emit({ ok: true, kind: 'claude-started', requestId: 'someone-else' });
     port.emit({ ok: true, kind: 'claude-thinking', requestId: 'someone-else' });
@@ -199,7 +220,7 @@ describe('the streaming port', () => {
     expect(chunks.join('')).toBe('mine');
   });
 
-  it('rejects with the host\'s own message and remedy', async () => {
+  it("rejects with the host's own message and remedy", async () => {
     const port = new FakePort();
     const running = stream(port);
     port.emit({
@@ -253,7 +274,9 @@ describe('the streaming port', () => {
       const port = new FakePort();
       const controller = new AbortController();
       controller.abort();
-      expect(await failure(stream(port, { signal: controller.signal }))).toMatchObject({ code: 'aborted' });
+      expect(await failure(stream(port, { signal: controller.signal }))).toMatchObject({
+        code: 'aborted',
+      });
       expect(port.sent).toEqual([]);
     });
 
@@ -261,7 +284,10 @@ describe('the streaming port', () => {
       const port = new FakePort();
       const controller = new AbortController();
       const chunks: string[] = [];
-      const running = stream(port, { signal: controller.signal, onText: (t: string) => chunks.push(t) });
+      const running = stream(port, {
+        signal: controller.signal,
+        onText: (t: string) => chunks.push(t),
+      });
 
       port.emit({ ok: true, kind: 'claude-delta', requestId: 'req-1', text: 'before' });
       controller.abort();
@@ -282,21 +308,35 @@ describe('host failures the panel has to act on', () => {
     ['claude-cli-failed', 'claude-cli-failed'],
     ['bad-request', 'claude-cli-failed'],
   ] as const)('maps %s onto %s', (hostCode, appCode) => {
-    const error = hostFailureToAppError({ ok: false, code: hostCode, message: 'because', command: 'do-this' });
+    const error = hostFailureToAppError({
+      ok: false,
+      code: hostCode,
+      message: 'because',
+      command: 'do-this',
+    });
     expect(error.code).toBe(appCode);
     expect(error.remedies).toHaveLength(1);
   });
 
   it('offers no remedy when the host had no command to give', () => {
-    expect(hostFailureToAppError({ ok: false, code: 'claude-cli-failed', message: 'x' }).remedies).toEqual([]);
+    expect(
+      hostFailureToAppError({ ok: false, code: 'claude-cli-failed', message: 'x' }).remedies,
+    ).toEqual([]);
   });
 });
 
 describe('running an interview turn over the Claude Code transport', () => {
-  const codeReply = ['Here it is.\n\n```js\n', 'const seen = new Map();\n', '```\n\nThat is the shape.'];
+  const codeReply = [
+    'Here it is.\n\n```js\n',
+    'const seen = new Map();\n',
+    '```\n\nThat is the shape.',
+  ];
 
   /** Runs one turn on Claude Code, replaying `chunks` as the CLI's deltas. */
-  async function viaClaudeCode(rung: Rung, chunks: string[]): Promise<{ output: string; port: FakePort }> {
+  async function viaClaudeCode(
+    rung: Rung,
+    chunks: string[],
+  ): Promise<{ output: string; port: FakePort }> {
     const port = new FakePort();
     let output = '';
     const running = runInterviewTurn({
@@ -309,7 +349,8 @@ describe('running an interview turn over the Claude Code transport', () => {
     });
     // The port is opened synchronously inside the provider.
     await Promise.resolve();
-    for (const text of chunks) port.emit({ ok: true, kind: 'claude-delta', requestId: port.start.requestId, text });
+    for (const text of chunks)
+      port.emit({ ok: true, kind: 'claude-delta', requestId: port.start.requestId, text });
     port.emit({ ok: true, kind: 'claude-done', requestId: port.start.requestId });
     await running;
     return { output, port };
@@ -323,14 +364,17 @@ describe('running an interview turn over the Claude Code transport', () => {
     expect(port.start.prompt).toContain('Unlocked rung: 1');
   });
 
-  it.each([0, 1, 2, 3] satisfies Rung[])('runs the spoiler guard over a rung %i reply', async (rung) => {
-    const { output } = await viaClaudeCode(rung, codeReply);
-    expect(output).not.toContain('new Map()');
-    expect(output).not.toContain('```');
-    expect(output).toContain(WITHHELD_NOTICE.trim());
-    expect(output).toContain('Here it is.');
-    expect(output).toContain('That is the shape.');
-  });
+  it.each([0, 1, 2, 3] satisfies Rung[])(
+    'runs the spoiler guard over a rung %i reply',
+    async (rung) => {
+      const { output } = await viaClaudeCode(rung, codeReply);
+      expect(output).not.toContain('new Map()');
+      expect(output).not.toContain('```');
+      expect(output).toContain(WITHHELD_NOTICE.trim());
+      expect(output).toContain('Here it is.');
+      expect(output).toContain('That is the shape.');
+    },
+  );
 
   it.each([4, 5] satisfies Rung[])('lets code through at rung %i', async (rung) => {
     const { output } = await viaClaudeCode(rung, codeReply);
@@ -345,7 +389,9 @@ describe('the model setting', () => {
   });
 
   it('round-trips a switch to another model', async () => {
-    await expect(setSettings({ model: 'claude-opus-5' })).resolves.toEqual({ model: 'claude-opus-5' });
+    await expect(setSettings({ model: 'claude-opus-5' })).resolves.toEqual({
+      model: 'claude-opus-5',
+    });
     await expect(getSettings()).resolves.toEqual({ model: 'claude-opus-5' });
   });
 

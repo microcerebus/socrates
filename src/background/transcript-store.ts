@@ -24,7 +24,14 @@
  * statement or a stale editor buffer would be worse than no resume at all.
  */
 
-import { MAX_RUNG, MIN_RUNG, type Rung, type StoredSession, type Turn, type TurnRole } from '../shared/types.ts';
+import {
+  MAX_RUNG,
+  MIN_RUNG,
+  type Rung,
+  type StoredSession,
+  type Turn,
+  type TurnRole,
+} from '../shared/types.ts';
 
 const SESSIONS_KEY = 'socrates:sessions';
 
@@ -42,7 +49,9 @@ export const TRUNCATION_MARKER = '\n\n_[earlier text trimmed to keep the saved s
 type SessionsBySlug = Record<string, StoredSession>;
 
 function isRung(value: unknown): value is Rung {
-  return typeof value === 'number' && Number.isInteger(value) && value >= MIN_RUNG && value <= MAX_RUNG;
+  return (
+    typeof value === 'number' && Number.isInteger(value) && value >= MIN_RUNG && value <= MAX_RUNG
+  );
 }
 
 function coerceRung(value: unknown, fallback: Rung): Rung {
@@ -79,7 +88,8 @@ export function coerceSession(value: unknown): StoredSession | null {
     title: typeof record['title'] === 'string' ? record['title'] : record['slug'],
     startedAt: record['startedAt'],
     updatedAt: typeof record['updatedAt'] === 'number' ? record['updatedAt'] : 0,
-    elapsedMs: typeof record['elapsedMs'] === 'number' && record['elapsedMs'] >= 0 ? record['elapsedMs'] : 0,
+    elapsedMs:
+      typeof record['elapsedMs'] === 'number' && record['elapsedMs'] >= 0 ? record['elapsedMs'] : 0,
     rung,
     // A deepest rung below the current one is incoherent; the current rung wins.
     deepestRung: Math.max(rung, coerceRung(record['deepestRung'], rung)) as Rung,

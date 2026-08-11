@@ -13,7 +13,7 @@ There is no API key to configure and nothing to share: everyone who installs thi
 
 - Chrome or Brave
 - [Claude Code](https://claude.com/claude-code) installed and logged in - any authentication method it supports (subscription or API key) works, since Socrates only ever runs the CLI, never Anthropic's API directly
-- Node 20+ and pnpm, to build the extension
+- Node 22.22.1+ and pnpm, to build the extension (the commit hooks' `lint-staged` needs it - see [Contributing](#contributing))
 
 ## Setup
 
@@ -57,14 +57,14 @@ When the window is exhausted the panel says so and repeats the CLI's own message
 
 Six rungs. You unlock them one at a time with a button; nothing above the unlocked rung may appear in a reply.
 
-| Rung | Name | What it may reveal | Counts as a hint |
-| --- | --- | --- | --- |
-| 0 | Understand | Restate the problem, surface edge cases, agree the contract | No |
-| 1 | Pattern smell | One Socratic question pointing at the family of technique, never naming it | Yes |
-| 2 | Name the technique | The technique or data structure, and why this problem invites it | Yes |
-| 3 | Approach outline | Three to five plain-English steps, no code | Yes |
-| 4 | Pseudocode | Structure, state and invariants, in your language idioms | Yes |
-| 5 | Full walkthrough | Working solution, complexity, and a review of your own code against it | Yes |
+| Rung | Name               | What it may reveal                                                         | Counts as a hint |
+| ---- | ------------------ | -------------------------------------------------------------------------- | ---------------- |
+| 0    | Understand         | Restate the problem, surface edge cases, agree the contract                | No               |
+| 1    | Pattern smell      | One Socratic question pointing at the family of technique, never naming it | Yes              |
+| 2    | Name the technique | The technique or data structure, and why this problem invites it           | Yes              |
+| 3    | Approach outline   | Three to five plain-English steps, no code                                 | Yes              |
+| 4    | Pseudocode         | Structure, state and invariants, in your language idioms                   | Yes              |
+| 5    | Full walkthrough   | Working solution, complexity, and a review of your own code against it     | Yes              |
 
 The header counts hints out of five, not six, because rung 0 is free: understanding the problem is not a hint.
 
@@ -115,20 +115,20 @@ A request/response call like `ping` is one message in, one message out, so it ri
 A model reply cannot: it arrives as hundreds of small frames over tens of seconds, and `sendNativeMessage` gives you exactly one.
 So streaming a reply opens a `connectNative` port instead, one per turn - a port that dies with its request needs no routing, reconnection or staleness rules, and disconnecting is itself the hardest cancellation available.
 
-| Path | Role |
-| --- | --- |
-| `src/prompt/` | Rung definitions, the system prompt, the context turn, the spoiler guard |
-| `src/background/` | Service worker: page capture, the Claude Code transport, the session log |
-| `src/background/providers.ts` | The transport `interview.ts` calls, behind one function type |
-| `src/content/` | Isolated-world scraper plus the MAIN-world Monaco bridge |
-| `src/content/scrape/selectors.ts` | Every LeetCode DOM selector, in one file, as fallback chains |
-| `src/panel/` | The React side panel |
-| `src/native-host/` | The native messaging host: runs `claude` headlessly and streams its reply back |
-| `src/shared/` | Types and the panel/worker wire protocol |
+| Path                              | Role                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| `src/prompt/`                     | Rung definitions, the system prompt, the context turn, the spoiler guard       |
+| `src/background/`                 | Service worker: page capture, the Claude Code transport, the session log       |
+| `src/background/providers.ts`     | The transport `interview.ts` calls, behind one function type                   |
+| `src/content/`                    | Isolated-world scraper plus the MAIN-world Monaco bridge                       |
+| `src/content/scrape/selectors.ts` | Every LeetCode DOM selector, in one file, as fallback chains                   |
+| `src/panel/`                      | The React side panel                                                           |
+| `src/native-host/`                | The native messaging host: runs `claude` headlessly and streams its reply back |
+| `src/shared/`                     | Types and the panel/worker wire protocol                                       |
 
 ### Running the Claude Code CLI
 
-`src/native-host/claude.ts` carries the flags and why each one is there; the short version is that the interviewer prompt is passed as `--system-prompt`, which *replaces* Claude Code's own system prompt rather than appending to it, and `--tools ""` leaves the session with no tools at all. So the run is single-turn text generation with the rung rules as the only instruction in force — it cannot read files, run commands, or loop. `--safe-mode`, `--setting-sources ""`, `--strict-mcp-config` and `--disable-slash-commands` keep the machine's own CLAUDE.md files, hooks, MCP servers and skills out of an interview, and the child runs in a temp directory so there is nothing to discover anyway.
+`src/native-host/claude.ts` carries the flags and why each one is there; the short version is that the interviewer prompt is passed as `--system-prompt`, which _replaces_ Claude Code's own system prompt rather than appending to it, and `--tools ""` leaves the session with no tools at all. So the run is single-turn text generation with the rung rules as the only instruction in force — it cannot read files, run commands, or loop. `--safe-mode`, `--setting-sources ""`, `--strict-mcp-config` and `--disable-slash-commands` keep the machine's own CLAUDE.md files, hooks, MCP servers and skills out of an interview, and the child runs in a temp directory so there is nothing to discover anyway.
 
 Multi-turn is stateless: the transcript is flattened into one prompt and resent every call, and nothing is resumed. `--input-format stream-json` looks like the way to replay a message array but is not — it re-runs the model once per user message rather than priming history.
 
@@ -138,7 +138,7 @@ Multi-turn is stateless: the transcript is flattened into one prompt and resent 
 
 LeetCode uses Monaco, which virtualises long files: only the lines currently on screen exist in the DOM.
 Scraping `.view-line` elements therefore truncates silently, which is worse than failing.
-So a MAIN-world content script reads the editor *model* (`monaco.editor.getModels()`), which holds the whole buffer, and posts it back to the isolated content script.
+So a MAIN-world content script reads the editor _model_ (`monaco.editor.getModels()`), which holds the whole buffer, and posts it back to the isolated content script.
 The extension is read-only on the page: it never types, clicks, or submits.
 
 ### When the page drifts
@@ -151,11 +151,11 @@ If none of the chains hit, the panel says so and offers a paste box for the prob
 
 Open the gear in the panel header.
 
-| Model | When |
-| --- | --- |
-| `claude-sonnet-5` | Default. Balanced. |
-| `claude-opus-5` | Deepest reasoning, slower. |
-| `claude-haiku-4-5-20251001` | Fastest and cheapest. |
+| Model                       | When                       |
+| --------------------------- | -------------------------- |
+| `claude-sonnet-5`           | Default. Balanced.         |
+| `claude-opus-5`             | Deepest reasoning, slower. |
+| `claude-haiku-4-5-20251001` | Fastest and cheapest.      |
 
 The CLI accepts full model ids, so the picker maps straight through - `--model` on the invocation.
 Switching model takes effect on your next message, with no reload, because the worker reads settings per turn rather than caching them.
@@ -175,11 +175,11 @@ Both schemes were checked visually before shipping, including chat bubbles, ladd
 Each rung owns a hue, running cool to warm as the assistance escalates.
 
 | Rung | 0 Understand | 1 Pattern smell | 2 Name the technique | 3 Approach outline | 4 Pseudocode | 5 Full walkthrough |
-| --- | --- | --- | --- | --- | --- | --- |
-| Hue | Sky | Blue | Mauve | Yellow | Peach | Red |
+| ---- | ------------ | --------------- | -------------------- | ------------------ | ------------ | ------------------ |
+| Hue  | Sky          | Blue            | Mauve                | Yellow             | Peach        | Red                |
 
 The temperature is the message: you should be able to glance at the footer and know you have moved from being nudged to being told, without reading a word.
-The same hue carries the ladder meter, the badge and spine on every interviewer message, the rung pill and hint counter in the header, and the unlock button - which wears the colour of the rung it *would* unlock, so the cost of the next click is visible before it is read.
+The same hue carries the ladder meter, the badge and spine on every interviewer message, the rung pill and hint counter in the header, and the unlock button - which wears the colour of the rung it _would_ unlock, so the cost of the next click is visible before it is read.
 
 Rung colour is never used for prose or for a button label.
 Catppuccin Latte's warm accents sit around 2.4:1 against Base, so rung colour is confined to bars, borders, dots and washes, and a filled control uses the hue itself in Mocha but a wash of it in Latte.
@@ -189,11 +189,11 @@ Motion follows the same rule as colour - it only ever means something - and `pre
 
 The panel distinguishes four states and will not claim more than the events it has received support (`src/panel/turn-progress.ts`).
 
-| State | What it means |
-| --- | --- |
-| `connecting…` | The request has gone out and not one frame has come back. This is the CLI starting up. |
-| `thinking…` | The transport says the turn is under way; no answer text yet. Heartbeats are still arriving. |
-| `writing…` | Text is arriving. |
+| State                        | What it means                                                                                                            |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `connecting…`                | The request has gone out and not one frame has come back. This is the CLI starting up.                                   |
+| `thinking…`                  | The transport says the turn is under way; no answer text yet. Heartbeats are still arriving.                             |
+| `writing…`                   | Text is arriving.                                                                                                        |
 | `still working - long think` | Nothing at all for 25 seconds. The run has not failed, and the panel does not pretend otherwise - it says what it knows. |
 
 An animated glyph and a counting-up elapsed time run alongside the label, and Stop is in the indicator itself as well as the composer.
@@ -206,7 +206,7 @@ Each problem's transcript, rung, hints and elapsed time are saved in `chrome.sto
 
 This is about the usage window rather than convenience.
 Every turn draws on the same Claude Code pool as your real work, so re-explaining a problem and re-earning three hints you already paid for is the most wasteful thing the panel could do.
-Resuming restores the conversation *and* the rung, so nothing is bought twice.
+Resuming restores the conversation _and_ the rung, so nothing is bought twice.
 
 Storage is bounded on four axes - characters per turn, turns per session, characters per session, and number of sessions - and the oldest are pruned first (`src/background/transcript-store.ts`).
 The page snapshot is deliberately not saved: it is re-scraped on resume, because a stale editor buffer would make "check my code" worse than useless.
@@ -230,7 +230,7 @@ There is no dashboard in v1.
 ## Development
 
 ```sh
-pnpm check        # typecheck, lint, tests
+pnpm check        # typecheck, lint, format check, tests
 pnpm build        # five vite passes into dist/
 pnpm test:watch
 pnpm icons        # regenerate the extension icons
@@ -245,16 +245,16 @@ Re-run the installer after any build you intend to load, or native messaging sil
 
 ### Tests
 
-| File | Covers |
-| --- | --- |
-| `tests/prompt-gating.test.ts` | Rung gating in the system prompt, the context turn, and the spoiler guard in isolation |
-| `tests/scraper.test.ts` | The scraper against saved LeetCode HTML: current layout, a drifted layout, and an unrecognisable one |
-| `tests/native-host.test.ts` | Native messaging framing, config parsing, and request dispatch |
-| `tests/claude-host.test.ts` | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
-| `tests/claude-code.test.ts` | The extension half: the streaming port, cancellation, error mapping, transcript flattening, rung gating end to end, and race-safe settings writes |
-| `tests/streaming-ux.test.ts` | The CLI frames a turn in flight is read from, the host's liveness heartbeat against a real child process, the phase machine and stall detector, and the reveal pacer |
-| `tests/session-resume.test.ts` | Saving and restoring a session with its rung, surviving junk already on disk, and every storage bound |
-| `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed |
+| File                                | Covers                                                                                                                                                                |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/prompt-gating.test.ts`       | Rung gating in the system prompt, the context turn, and the spoiler guard in isolation                                                                                |
+| `tests/scraper.test.ts`             | The scraper against saved LeetCode HTML: current layout, a drifted layout, and an unrecognisable one                                                                  |
+| `tests/native-host.test.ts`         | Native messaging framing, config parsing, and request dispatch                                                                                                        |
+| `tests/claude-host.test.ts`         | The Claude Code half of the host: the arg vector, the stream parser, binary resolution, every failure classification, and a real spawned turn against a fake `claude` |
+| `tests/claude-code.test.ts`         | The extension half: the streaming port, cancellation, error mapping, transcript flattening, rung gating end to end, and race-safe settings writes                     |
+| `tests/streaming-ux.test.ts`        | The CLI frames a turn in flight is read from, the host's liveness heartbeat against a real child process, the phase machine and stall detector, and the reveal pacer  |
+| `tests/session-resume.test.ts`      | Saving and restoring a session with its rung, surviving junk already on disk, and every storage bound                                                                 |
+| `tests/claude-cli-contract.test.ts` | That the real `claude` still takes the flags the host passes and reports auth as JSON. No API calls. Skipped when `claude` is not installed                           |
 
 The problem bodies in `tests/fixtures/` are the real ones from LeetCode's public GraphQL endpoint; the page markup around them mirrors the live description tab.
 `tests/fixtures/fake-claude.mjs` is a stand-in for the CLI whose frames are copied from real `--output-format stream-json` runs, so the streaming tests spawn a real child process without spending a usage window.
@@ -264,6 +264,20 @@ The problem bodies in `tests/fixtures/` are the real ones from LeetCode's public
 Edit `src/prompt/rungs.ts` for what a rung may reveal, and `src/prompt/system-prompt.ts` for how the discipline is stated.
 Bump `SYSTEM_PROMPT_VERSION` when a change could alter behaviour.
 The gating tests read the rung table directly, so adding a rung or editing a `withholds` line keeps them meaningful rather than stale.
+
+## Contributing
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat: add rung 6`, `fix: stop double-counting hints`, `chore: bump vite`).
+A commit-msg hook rejects anything else, so a bad message never lands.
+
+Hooks are installed automatically by `pnpm install` (via `prepare`), using [husky](https://typicode.github.io/husky/):
+
+- **pre-commit** runs [lint-staged](https://github.com/lint-staged/lint-staged): eslint and prettier on staged files, plus the vitest files related to what you changed. This is deliberately narrower than the full suite so a commit stays fast; the full suite still runs before every push and in CI.
+- **commit-msg** runs commitlint against your message.
+- **pre-push** runs the full `pnpm test` suite.
+
+CI (`.github/workflows/ci.yml`) mirrors all of it on every pull request: commitlint over the PR's commits, `pnpm typecheck`, `pnpm lint`, `pnpm format:check`, and `pnpm test`.
+Nothing in CI should ever be stricter than what the hooks already enforced locally - if `pnpm check` is green before you push, CI should be green too.
 
 ## Out of scope for v1
 

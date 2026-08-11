@@ -42,12 +42,22 @@ async function askTab(tabId: number): Promise<ContentResponse> {
  * script. Inject both worlds once, then retry.
  */
 async function injectAndRetry(tabId: number): Promise<ContentResponse> {
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['page-bridge.js'], world: 'MAIN' });
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['content-script.js'], world: 'ISOLATED' });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['page-bridge.js'],
+    world: 'MAIN',
+  });
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['content-script.js'],
+    world: 'ISOLATED',
+  });
   return askTab(tabId);
 }
 
-async function capture(tabId: number): Promise<{ snapshot: PageSnapshot | null; failure?: string }> {
+async function capture(
+  tabId: number,
+): Promise<{ snapshot: PageSnapshot | null; failure?: string }> {
   let response: ContentResponse;
   try {
     response = await askTab(tabId);
@@ -59,7 +69,10 @@ async function capture(tabId: number): Promise<{ snapshot: PageSnapshot | null; 
     }
   }
   if (!response.ok) {
-    return { snapshot: null, failure: response.detail ? `${response.reason}: ${response.detail}` : response.reason };
+    return {
+      snapshot: null,
+      failure: response.detail ? `${response.reason}: ${response.detail}` : response.reason,
+    };
   }
   return {
     snapshot: { problem: response.problem, editor: response.editor, capturedAt: Date.now() },
@@ -107,7 +120,11 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'capture':
         void capture(message.tabId)
           .then(({ snapshot, failure }) =>
-            send(failure === undefined ? { kind: 'capture-result', snapshot } : { kind: 'capture-result', snapshot, failure }),
+            send(
+              failure === undefined
+                ? { kind: 'capture-result', snapshot }
+                : { kind: 'capture-result', snapshot, failure },
+            ),
           )
           .catch(fail);
         break;

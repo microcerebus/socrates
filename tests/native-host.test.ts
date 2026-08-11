@@ -46,7 +46,10 @@ describe('framing', () => {
 
   it('yields several messages arriving in one read', () => {
     const decoder = new MessageDecoder();
-    const buffer = Buffer.concat([encodeMessage({ kind: 'ping' }), encodeMessage({ kind: 'claude-probe' })]);
+    const buffer = Buffer.concat([
+      encodeMessage({ kind: 'ping' }),
+      encodeMessage({ kind: 'claude-probe' }),
+    ]);
     expect(decoder.push(buffer)).toEqual([{ kind: 'ping' }, { kind: 'claude-probe' }]);
   });
 
@@ -87,7 +90,9 @@ describe('request dispatch', () => {
   });
 
   it('refuses a streaming request kind, which main.ts drives instead', async () => {
-    await expect(handleRequest({ kind: 'claude-cancel', requestId: 'r1' }, deps())).resolves.toMatchObject({
+    await expect(
+      handleRequest({ kind: 'claude-cancel', requestId: 'r1' }, deps()),
+    ).resolves.toMatchObject({
       ok: false,
       code: 'bad-request',
     });

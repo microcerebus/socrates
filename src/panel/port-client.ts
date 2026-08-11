@@ -62,7 +62,10 @@ export class PortClient {
     return id;
   }
 
-  #once<T>(build: (id: number) => PanelRequest, extract: (frame: WorkerFrame) => T | undefined): Promise<T> {
+  #once<T>(
+    build: (id: number) => PanelRequest,
+    extract: (frame: WorkerFrame) => T | undefined,
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const id = this.#send(build, (frame) => {
         if (frame.kind === 'error') {
@@ -84,7 +87,10 @@ export class PortClient {
       (id) => ({ id, kind: 'capture', tabId }),
       (frame) =>
         frame.kind === 'capture-result'
-          ? { snapshot: frame.snapshot, ...(frame.failure === undefined ? {} : { failure: frame.failure }) }
+          ? {
+              snapshot: frame.snapshot,
+              ...(frame.failure === undefined ? {} : { failure: frame.failure }),
+            }
           : undefined,
     );
   }
@@ -151,36 +157,43 @@ export class PortClient {
       (id) => ({ id, kind: 'probe-claude' }),
       (frame) =>
         frame.kind === 'claude-ok'
-          ? { claudePath: frame.claudePath, account: frame.account, subscription: frame.subscription }
+          ? {
+              claudePath: frame.claudePath,
+              account: frame.account,
+              subscription: frame.subscription,
+            }
           : undefined,
     );
   }
 
   /** Returns a cancel function. */
   ask(request: AskRequest, callbacks: AskCallbacks): () => void {
-    const id = this.#send((newId) => ({ id: newId, kind: 'ask', request }), (frame) => {
-      switch (frame.kind) {
-        case 'delta':
-          callbacks.onDelta(frame.text);
-          break;
-        case 'started':
-          callbacks.onStarted();
-          break;
-        case 'thinking':
-          callbacks.onThinking();
-          break;
-        case 'done':
-          this.#handlers.delete(frame.id);
-          callbacks.onDone();
-          break;
-        case 'error':
-          this.#handlers.delete(frame.id);
-          callbacks.onError(frame.error);
-          break;
-        default:
-          break;
-      }
-    });
+    const id = this.#send(
+      (newId) => ({ id: newId, kind: 'ask', request }),
+      (frame) => {
+        switch (frame.kind) {
+          case 'delta':
+            callbacks.onDelta(frame.text);
+            break;
+          case 'started':
+            callbacks.onStarted();
+            break;
+          case 'thinking':
+            callbacks.onThinking();
+            break;
+          case 'done':
+            this.#handlers.delete(frame.id);
+            callbacks.onDone();
+            break;
+          case 'error':
+            this.#handlers.delete(frame.id);
+            callbacks.onError(frame.error);
+            break;
+          default:
+            break;
+        }
+      },
+    );
 
     return () => {
       this.#handlers.delete(id);

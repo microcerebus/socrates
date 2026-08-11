@@ -32,7 +32,9 @@ describe('url helpers', () => {
   });
 
   it('pulls the slug out of the path', () => {
-    expect(slugFromUrl('https://leetcode.com/problems/valid-parentheses/submissions/')).toBe('valid-parentheses');
+    expect(slugFromUrl('https://leetcode.com/problems/valid-parentheses/submissions/')).toBe(
+      'valid-parentheses',
+    );
     expect(slugFromUrl('https://leetcode.com/contest/')).toBeNull();
   });
 });
@@ -55,7 +57,9 @@ describe('current LeetCode layout', () => {
     if (!result.ok) return;
     const { statement, examples, constraints } = result.problem;
 
-    expect(statement).toContain('return indices of the two numbers such that they add up to target');
+    expect(statement).toContain(
+      'return indices of the two numbers such that they add up to target',
+    );
     expect(statement).not.toContain('Input: nums = [2,7,11,15]');
     expect(statement).not.toContain('-109 <= nums[i] <= 109');
 
@@ -87,7 +91,10 @@ describe('drifted layout', () => {
   const doc = fixture('longest-substring.drifted.html');
 
   it('still finds the description through the fallback chain', () => {
-    const result = parseProblem(doc, 'https://leetcode.com/problems/longest-substring-without-repeating-characters/');
+    const result = parseProblem(
+      doc,
+      'https://leetcode.com/problems/longest-substring-without-repeating-characters/',
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.problem.title).toBe('3. Longest Substring Without Repeating Characters');
@@ -106,7 +113,10 @@ describe('drifted layout', () => {
 
 describe('unrecognisable page', () => {
   it('fails cleanly so the panel can offer paste mode', () => {
-    const result = parseProblem(fixture('unrecognised.html'), 'https://leetcode.com/problems/mystery/');
+    const result = parseProblem(
+      fixture('unrecognised.html'),
+      'https://leetcode.com/problems/mystery/',
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.reason).toBe('no-problem-markup');
@@ -141,12 +151,18 @@ describe('section splitting', () => {
     );
     const sections = splitSections(doc.getElementById('r')!);
     expect(sections.statement).toBe('Do the thing.');
-    expect(sections.examples).toEqual(['Example 1:\nInput: a\nOutput: b', 'Example 2:\nInput: c\nOutput: d']);
+    expect(sections.examples).toEqual([
+      'Example 1:\nInput: a\nOutput: b',
+      'Example 2:\nInput: c\nOutput: d',
+    ]);
     expect(sections.constraints).toEqual(['1 <= n <= 10', 'n is odd']);
   });
 
   it('drops non-breaking-space spacers', () => {
-    const doc = new DOMParser().parseFromString('<div id="r"><p>&nbsp;</p><p>Real text.</p></div>', 'text/html');
+    const doc = new DOMParser().parseFromString(
+      '<div id="r"><p>&nbsp;</p><p>Real text.</p></div>',
+      'text/html',
+    );
     expect(splitSections(doc.getElementById('r')!).statement).toBe('Real text.');
   });
 });

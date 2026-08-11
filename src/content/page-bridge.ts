@@ -55,7 +55,9 @@ function pickModel(namespace: MonacoGlobal): MonacoModel | null {
   const focused = editors.find((editor) => editor.hasTextFocus?.() === true)?.getModel();
   if (focused) return focused;
 
-  const attached = editors.map((editor) => editor.getModel()).filter((model): model is MonacoModel => model !== null);
+  const attached = editors
+    .map((editor) => editor.getModel())
+    .filter((model): model is MonacoModel => model !== null);
   const models = attached.length > 0 ? attached : (namespace.editor?.getModels?.() ?? []);
   if (models.length === 0) return null;
 
@@ -79,7 +81,13 @@ function respond(nonce: string): void {
   } else {
     const model = pickModel(namespace);
     response = model
-      ? { type: PAGE_BRIDGE_RESPONSE, nonce, ok: true, language: languageOf(model), code: model.getValue() }
+      ? {
+          type: PAGE_BRIDGE_RESPONSE,
+          nonce,
+          ok: true,
+          language: languageOf(model),
+          code: model.getValue(),
+        }
       : { type: PAGE_BRIDGE_RESPONSE, nonce, ok: false, detail: 'no-editor-model' };
   }
 
@@ -94,7 +102,12 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
     respond(data.nonce);
   } catch (error) {
     window.postMessage(
-      { type: PAGE_BRIDGE_RESPONSE, nonce: data.nonce, ok: false, detail: String(error) } satisfies PageBridgeResponse,
+      {
+        type: PAGE_BRIDGE_RESPONSE,
+        nonce: data.nonce,
+        ok: false,
+        detail: String(error),
+      } satisfies PageBridgeResponse,
       window.location.origin,
     );
   }

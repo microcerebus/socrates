@@ -5,6 +5,9 @@
   "type": "module",
   "description": "A Chrome side-panel interviewer for LeetCode practice: incremental hints, never the answer.",
   "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22.22.1"
+  },
   "scripts": {
     "build": "pnpm build:panel && pnpm build:worker && pnpm build:content && pnpm build:bridge && pnpm build:host",
     "build:panel": "SOCRATES_TARGET=panel vite build",
@@ -17,13 +20,28 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "pnpm typecheck && pnpm lint && pnpm test"
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
+    "prepare": "husky"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write",
+      "vitest related --run"
+    ],
+    "*.{js,mjs,cjs,json,css,md}": [
+      "prettier --write"
+    ]
+  },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.2.5",
     "@types/node": "^26.2.0",
@@ -32,7 +50,10 @@
     "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^10.8.1",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "husky": "^9.1.7",
     "jsdom": "^30.0.1",
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.66.0",
     "vite": "^8.2.1",

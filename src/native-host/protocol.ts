@@ -22,11 +22,22 @@ export type HostRequest =
   | { kind: 'claude-start'; requestId: string; model: string; system: string; prompt: string }
   | { kind: 'claude-cancel'; requestId: string };
 
-export type HostFailureCode = 'claude-cli-missing' | 'claude-logged-out' | 'claude-usage-limit' | 'claude-cli-failed' | 'bad-request';
+export type HostFailureCode =
+  | 'claude-cli-missing'
+  | 'claude-logged-out'
+  | 'claude-usage-limit'
+  | 'claude-cli-failed'
+  | 'bad-request';
 
 export type HostResponse =
   | { ok: true; kind: 'pong'; claudePath: string | null }
-  | { ok: true; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
+  | {
+      ok: true;
+      kind: 'claude-ok';
+      claudePath: string;
+      account: string | null;
+      subscription: string | null;
+    }
   /** Sent once, when the CLI is up and about to call the API. */
   | { ok: true; kind: 'claude-started'; requestId: string }
   /**

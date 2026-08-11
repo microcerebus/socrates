@@ -595,7 +595,10 @@ pre code {
   border-radius: 3px;
   border: 1px solid var(--border);
   background: var(--surface-sunk);
-  transition: background 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+  transition:
+    background 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
 }
 
 .rung-meter li[data-state='spent'] {
@@ -634,7 +637,9 @@ button {
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
 }
 
 button:hover:not(:disabled) {

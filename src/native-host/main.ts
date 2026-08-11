@@ -55,7 +55,12 @@ function run(command: string, args: string[]): Promise<CommandResult> {
     });
     child.on('error', (error: NodeJS.ErrnoException) => {
       clearTimeout(timer);
-      resolve({ spawnErrorCode: error.code ?? 'SPAWN_FAILED', exitCode: -1, stdout, stderr: String(error) });
+      resolve({
+        spawnErrorCode: error.code ?? 'SPAWN_FAILED',
+        exitCode: -1,
+        stdout,
+        stderr: String(error),
+      });
     });
     child.on('close', (code) => {
       clearTimeout(timer);

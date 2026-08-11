@@ -22,13 +22,38 @@ const pidFile = process.env.FAKE_CLAUDE_PIDFILE;
 if (pidFile) writeFileSync(pidFile, String(process.pid), 'utf8');
 
 const say = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
-const delta = (text) => say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
-const thinking = () => say({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } });
+const delta = (text) =>
+  say({
+    type: 'stream_event',
+    event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } },
+  });
+const thinking = () =>
+  say({
+    type: 'stream_event',
+    event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } },
+  });
 // A thinking delta carries text in the real CLI. It is dropped here deliberately:
 // nothing downstream is allowed to read it, so nothing needs to see it.
-const thinkingDelta = () => say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'drafting the answer' } } });
-const init = () => say({ type: 'system', subtype: 'init', cwd: '/tmp', tools: [], model, claude_code_version: '2.1.226' });
-const result = ({ subtype = 'success', ...extra } = {}) => say({ type: 'result', subtype, num_turns: 1, ...extra });
+const thinkingDelta = () =>
+  say({
+    type: 'stream_event',
+    event: {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'thinking_delta', thinking: 'drafting the answer' },
+    },
+  });
+const init = () =>
+  say({
+    type: 'system',
+    subtype: 'init',
+    cwd: '/tmp',
+    tools: [],
+    model,
+    claude_code_version: '2.1.226',
+  });
+const result = ({ subtype = 'success', ...extra } = {}) =>
+  say({ type: 'result', subtype, num_turns: 1, ...extra });
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -61,7 +86,8 @@ switch (model) {
   }
 
   case 'scenario-fenced-code': {
-    for (const piece of ['Here it is.\n\n```js\n', 'const seen = new Map();\n', '```\n\nDone.']) delta(piece);
+    for (const piece of ['Here it is.\n\n```js\n', 'const seen = new Map();\n', '```\n\nDone.'])
+      delta(piece);
     result({ is_error: false, result: 'code' });
     break;
   }
@@ -71,7 +97,10 @@ switch (model) {
     // would print the error into the panel as though the interviewer said it.
     say({
       type: 'assistant',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'Not logged in · Please run /login' }] },
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Not logged in · Please run /login' }],
+      },
       error: 'authentication_failed',
       is_api_error_message: true,
     });
@@ -103,7 +132,11 @@ switch (model) {
   case 'scenario-no-partials-diagnostic': {
     // Terminates without is_error, but the subtype says `result` holds a CLI
     // diagnostic rather than anything the model said. Nothing to show.
-    result({ subtype: 'error_max_turns', is_error: false, result: 'Reached maximum number of turns.' });
+    result({
+      subtype: 'error_max_turns',
+      is_error: false,
+      result: 'Reached maximum number of turns.',
+    });
     break;
   }
 

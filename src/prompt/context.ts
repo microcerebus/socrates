@@ -37,7 +37,13 @@ export interface UserTurnInput {
   elapsedMs: number;
 }
 
-export function buildUserTurn({ snapshot, rung, intent, message, elapsedMs }: UserTurnInput): string {
+export function buildUserTurn({
+  snapshot,
+  rung,
+  intent,
+  message,
+  elapsedMs,
+}: UserTurnInput): string {
   const { problem, editor } = snapshot;
   const sections: string[] = [];
 
@@ -50,7 +56,9 @@ export function buildUserTurn({ snapshot, rung, intent, message, elapsedMs }: Us
     .filter(Boolean)
     .join('\n');
 
-  sections.push(`# PROBLEM\n${heading}\n\n## Statement\n${clamp(problem.statement.trim(), MAX_STATEMENT_CHARS)}`);
+  sections.push(
+    `# PROBLEM\n${heading}\n\n## Statement\n${clamp(problem.statement.trim(), MAX_STATEMENT_CHARS)}`,
+  );
 
   if (problem.examples.length > 0) {
     sections.push(`## Examples\n${problem.examples.join('\n\n')}`);
