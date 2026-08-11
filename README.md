@@ -13,7 +13,7 @@ There is no API key to configure and nothing to share: everyone who installs thi
 
 - Chrome or Brave
 - [Claude Code](https://claude.com/claude-code) installed and logged in - any authentication method it supports (subscription or API key) works, since Socrates only ever runs the CLI, never Anthropic's API directly
-- Node 22.12+ and pnpm, to build the extension (the commit hooks' `commitlint`/`lint-staged` need it - see [Contributing](#contributing))
+- Node 22.22.1+ and pnpm, to build the extension (the commit hooks' `lint-staged` needs it - see [Contributing](#contributing))
 
 ## Setup
 
