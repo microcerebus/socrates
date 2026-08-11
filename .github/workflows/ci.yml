@@ -5,26 +5,42 @@ on:
   push:
     branches: [main]
 
+# Least privilege, stated here rather than inherited: the repo-level default can
+# be widened by a settings change, and this job only ever needs to read the tree.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned by commit SHA, not by tag: a tag is mutable, so a
+      # compromised action repo could re-point it and run in CI. The trailing
+      # comment records which release each SHA is, for upgrades.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22.22.1
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
+      # The SHAs go through env rather than straight into `run:`. Both are
+      # 40-hex values GitHub supplies, so interpolating them is safe today; it is
+      # still the canonical script-injection shape and this costs nothing.
       - name: Lint commit messages
         if: github.event_name == 'pull_request'
-        run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
 
       - name: Typecheck
         run: pnpm typecheck

@@ -21,9 +21,17 @@ import {
   coerceSession,
   getSession,
   normaliseSession,
+  clearAllSessions,
   pruneSessions,
   saveSession,
 } from '../src/background/transcript-store.ts';
+import {
+  clearAllAttempts,
+  getAttempts,
+  getSettings,
+  recordAttempt,
+  setSettings,
+} from '../src/background/session-store.ts';
 import { classifyCapture } from '../src/panel/problem-switch.ts';
 import { createSessionWriter } from '../src/panel/session-writer.ts';
 import { hintsUsedFor } from '../src/prompt/rungs.ts';
@@ -48,6 +56,10 @@ function stubChrome(): Record<string, unknown> {
         get: (key: string) => later(key in store ? { [key]: store[key] } : {}),
         set: (values: Record<string, unknown>) => {
           Object.assign(store, values);
+          return later(undefined);
+        },
+        remove: (key: string) => {
+          delete store[key];
           return later(undefined);
         },
       },
@@ -782,5 +794,56 @@ describe('rapid navigation with out-of-order resolutions', () => {
     // The later navigation to C arrives as its own event.
     await follow(w, page('b'), pageReader([], page('c')), adopt);
     expect(w.active).toBe('c');
+  });
+});
+
+/**
+ * Transcripts hold the user's own editor buffer, unencrypted, for up to
+ * `MAX_SESSIONS` problems, and until now the only way to remove one was
+ * per-problem through a resume offer. "Clear all saved data" in Settings is the
+ * answer to "get this off my machine", so it has to actually clear all of it.
+ */
+describe('clearing everything the extension has saved', () => {
+  it('removes every transcript, not only the problem on screen', async () => {
+    await saveSession(session({ slug: 'two-sum', turns: [turn('user', 'a')] }));
+    await saveSession(session({ slug: 'three-sum', turns: [turn('user', 'b')] }));
+
+    await clearAllSessions();
+
+    expect(await getSession('two-sum')).toBeNull();
+    expect(await getSession('three-sum')).toBeNull();
+  });
+
+  it('removes the session log too', async () => {
+    await recordAttempt({
+      slug: 'two-sum',
+      title: '1. Two Sum',
+      startedAt: '2026-08-11T10:00:00.000Z',
+      durationMs: 60_000,
+      deepestRung: 2,
+      hintsUsed: hintsUsedFor(2),
+    });
+    expect(await getAttempts('two-sum')).toHaveLength(1);
+
+    await clearAllAttempts();
+
+    expect(await getAttempts('two-sum')).toEqual([]);
+  });
+
+  it('cannot be undone by a save that was already in flight', async () => {
+    // The panel saves on `pagehide` and on every finished turn, so a save and a
+    // clear really can overlap. Both go through the one queue, in call order.
+    const saving = saveSession(session({ slug: 'two-sum', turns: [turn('user', 'a')] }));
+    const clearing = clearAllSessions();
+    await Promise.all([saving, clearing]);
+
+    expect(await getSession('two-sum')).toBeNull();
+  });
+
+  it('leaves the settings alone: a model choice is a preference, not saved data', async () => {
+    await setSettings({ model: 'claude-haiku-4-5-20251001' });
+    await clearAllSessions();
+    await clearAllAttempts();
+    expect((await getSettings()).model).toBe('claude-haiku-4-5-20251001');
   });
 });

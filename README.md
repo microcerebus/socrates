@@ -30,8 +30,8 @@ Then in Chrome or Brave:
 2. Turn on **Developer mode**.
 3. Click **Load unpacked** and choose the `dist` folder.
 
-The manifest pins a public key, so the extension id is stable no matter where `dist/` lives - that is what keeps the native messaging registration below valid across rebuilds.
-Chrome and Brave have each been seen to hand this build a different id; the installer registers both.
+The manifest pins a public key, so the extension id is a pure function of that key: the same in Chrome, Brave and Chromium, and unchanged when `dist/` moves.
+That is what keeps the native messaging registration below valid across rebuilds, and the installer derives the id from the manifest rather than carrying a copy of it.
 
 ### 2. Run the installer once
 
@@ -41,7 +41,11 @@ Chrome and Brave have each been seen to hand this build a different id; the inst
 
 This registers a native messaging host with every installed Chrome and Brave profile, and records the resolved `claude` binary path in `~/.config/socrates/native-host.json`.
 Nothing secret is written.
-Re-running merges rather than clobbers - registering Chrome does not deregister Brave - so it is safe to re-run after installing `claude` somewhere new or moving it.
+Re-run it after installing `claude` somewhere new or moving it.
+
+Each run states the whole allowlist rather than adding to it: the host manifest ends up granting access to exactly the extension id derived from `public/manifest.json`, and any other id a previous install left behind is removed and reported.
+That is deliberate - `allowed_origins` is the only thing standing between another extension and your `claude` CLI, so it has to be able to shrink.
+If you installed Socrates before this change, re-running the installer is enough; there is nothing to clean up by hand as long as the browser profile still exists.
 
 ### 3. Open a LeetCode problem
 
@@ -163,6 +167,10 @@ Each change is a patch against the newest intent rather than a whole object buil
 
 **Test Claude Code access** reports the resolved `claude` binary and which account it is logged in as, learned from the host rather than hardcoded.
 
+**Clear all saved data** deletes every stored transcript and the whole session log, in one two-step click.
+Your model choice is a preference rather than data, and is kept.
+There is no undo.
+
 ## Appearance
 
 Dark is the primary scheme, because LeetCode practice usually happens in dark mode; light is the verified secondary.
@@ -226,6 +234,34 @@ The record is upserted as you climb, so it stays current without needing to catc
 A resumed session keeps the attempt id it started with, so one problem-sitting stays one row with one deepest rung rather than splitting into several shallower-looking attempts.
 Past attempts at the current problem appear under the header.
 There is no dashboard in v1.
+
+## Security model
+
+Four trust boundaries, in the order they matter. A change that crosses one of these is worth a second look.
+
+**Everything read from leetcode.com is untrusted input.**
+The problem statement, examples, constraints, title and your editor buffer are scraped from a page that is user-generated in places, and the panel follows that page as you navigate.
+So every scraped field is wrapped in a `<<<PAGE-DATA id=… field=…>>>` block with an id generated fresh for each turn, the id is stripped from the content, and both the system prompt and the turn itself say that anything inside those markers is page data and never an instruction (`src/prompt/untrusted.ts`).
+Without that, a crafted problem page could hand out rung-5 solutions at rung 0 - for this product, the worst outcome available.
+The editor language id is the one scraped string that cannot be fenced, because the system prompt names it mid-sentence, so it is reduced to a short label instead.
+
+**The panel renders no HTML.**
+The Markdown renderer emits React elements, never HTML strings, and it implements no link syntax at all, so neither model output nor page text can produce script execution or a `javascript:` URL.
+Keep it that way: `dangerouslySetInnerHTML` anywhere in `src/panel/` would undo it.
+
+**`allowed_origins` is the only gate on the native host.**
+Any extension listed in the host manifest can open a port, run your `claude` CLI with any system prompt it likes as often as it likes, read every token of the reply, and ask `claude auth status --json` which account is paying.
+There is no second check, and there is no need for one as long as that list is right - which is why the installer derives the id from the pinned key and withdraws anything else (`tests/extension-manifest.test.ts` pins both).
+The host itself validates message shape only.
+
+**`~/.config/socrates/native-host.json` is trusted, not secret.**
+It holds no credential, but it names the binary the host executes, so anyone who can write it chooses what runs under the browser's native-host context.
+The child gets an explicit environment allowlist rather than the browser's whole environment (an `ANTHROPIC_API_KEY` in there would silently change which account is billed), the system prompt is handed over as a 0600 temp file rather than on argv where `ps` shows it, and the CLI is spawned with an argv array and no shell.
+
+**What is stored, and where.**
+`chrome.storage.local`, unencrypted, on your machine only: one transcript per problem (statement, hints and your editor buffer) for up to 24 problems, a log of past attempts, and your model choice.
+Nothing is sent anywhere except to your own `claude` CLI when you ask for a hint; the extension makes no network requests of its own and asks for no host permission beyond leetcode.com.
+**Settings → Saved data → Clear all saved data** deletes every transcript and the whole attempt log in one step.
 
 ## Development
 

@@ -10,11 +10,20 @@
  *   --verbose` is the only combination that emits token-level `text_delta`
  *   frames. Without `--include-partial-messages` you get whole messages and the
  *   panel sits blank until the reply is finished.
- * - `--system-prompt` *replaces* Claude Code's own system prompt rather than
- *   appending to it. That was checked empirically (a replacement persona took
- *   over completely, and the request dropped from ~5.5k prompt tokens to ~250),
- *   and it is what makes the rung discipline the only instruction in force.
- *   `--append-system-prompt` would leave the coding-agent prompt underneath it.
+ * - `--system-prompt-file` *replaces* Claude Code's own system prompt rather
+ *   than appending to it, exactly as `--system-prompt` does. That was checked
+ *   empirically for both (a replacement persona took over completely, and the
+ *   request dropped from ~5.5k prompt tokens to ~250), most recently against CLI
+ *   2.1.227 for the file form. `--append-system-prompt` would leave the
+ *   coding-agent prompt underneath it.
+ *
+ *   The file form is used because argv is world-readable on this machine: any
+ *   process running as the user can read a running command's arguments with
+ *   `ps -ww -o args`. The prompt is a pure function of (rung, language) and holds
+ *   nothing secret today, but it is the file every future prompt change lands in,
+ *   and a 0600 file in a 0700 directory is not a thing `ps` can show. `--help`
+ *   does not list this flag by name, so `tests/claude-cli-contract.test.ts` pins
+ *   it by invoking it rather than by grepping the help text.
  * - `--tools ""` leaves the session with an empty tool list, so the interviewer
  *   cannot read files, run commands, or loop. Combined with a single prompt this
  *   is single-turn generation: the CLI reports `num_turns: 1`.
@@ -80,16 +89,17 @@
 /** The CLI accepts full model ids as well as aliases; the settings ids pass straight through. */
 export interface ClaudeInvocation {
   model: string;
-  system: string;
+  /** Path to the file holding the system prompt. Never the prompt itself - see the header. */
+  systemPromptPath: string;
 }
 
-export function claudeArgs({ model, system }: ClaudeInvocation): string[] {
+export function claudeArgs({ model, systemPromptPath }: ClaudeInvocation): string[] {
   return [
     '--print',
     '--model',
     model,
-    '--system-prompt',
-    system,
+    '--system-prompt-file',
+    systemPromptPath,
     // An empty tool list. The interviewer generates text and nothing else.
     '--tools',
     '',
@@ -110,6 +120,44 @@ export function claudeArgs({ model, system }: ClaudeInvocation): string[] {
 export const CLAUDE_ENV: Readonly<Record<string, string>> = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
 };
+
+/**
+ * The only variables of the host's own environment the child is given.
+ *
+ * Chrome spawns the native host, so the host's environment is *Chrome's*
+ * environment - whatever the user's desktop session or shell happened to export.
+ * Forwarding all of it is the wrong default for a process the user did not ask
+ * to launch, and one variable in particular changes the answer: an
+ * `ANTHROPIC_API_KEY` in the browser's environment silently moves the run off
+ * the user's Claude Code login and onto a metered API account.
+ *
+ * `HOME` is load-bearing - it is where the CLI's credentials live - and `PATH`
+ * is what lets the CLI find anything it shells out to. The rest are locale and
+ * temp-file conventions. Proxy and custom-CA variables are deliberately *not*
+ * forwarded: nothing here has ever needed them, and each one is a way to point
+ * the CLI somewhere else. Adding one is a deliberate change to this list.
+ */
+export const INHERITED_ENV_VARS: readonly string[] = [
+  'HOME',
+  'PATH',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'TMPDIR',
+];
+
+/** The complete environment for a `claude` run: an allowlist, plus what we set. */
+export function claudeEnv(
+  parent: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const name of INHERITED_ENV_VARS) {
+    const value = parent[name];
+    if (value !== undefined) env[name] = value;
+  }
+  return { ...env, ...CLAUDE_ENV };
+}
 
 export const CLAUDE_LOGIN_COMMAND = 'claude auth login';
 export const CLAUDE_STATUS_COMMAND = 'claude auth status';

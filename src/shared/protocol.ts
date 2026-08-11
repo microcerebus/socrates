@@ -46,6 +46,8 @@ export type PanelRequest =
   | { id: number; kind: 'get-session'; slug: string }
   | { id: number; kind: 'save-session'; session: StoredSession }
   | { id: number; kind: 'clear-session'; slug: string }
+  /** Deletes every saved transcript and the whole session log. Settings survive. */
+  | { id: number; kind: 'clear-all-data' }
   | { id: number; kind: 'probe-claude' }
   | { id: number; kind: 'host-info' };
 
@@ -70,6 +72,8 @@ export type WorkerFrame =
     }
   | { id: number; kind: 'host-info'; claudePath: string | null }
   | { id: number; kind: 'ack' }
+  /** Every saved transcript and attempt is gone. */
+  | { id: number; kind: 'cleared' }
   | { id: number; kind: 'error'; error: AppError };
 
 /** `Omit` over a union collapses it to the shared keys; this keeps the members apart. */

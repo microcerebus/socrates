@@ -145,6 +145,14 @@ export class PortClient {
     ).then(() => undefined);
   }
 
+  /** Deletes every saved transcript and the whole session log. Settings survive. */
+  clearAllData(): Promise<void> {
+    return this.#once(
+      (id) => ({ id, kind: 'clear-all-data' }),
+      (frame) => (frame.kind === 'cleared' ? true : undefined),
+    ).then(() => undefined);
+  }
+
   hostInfo(): Promise<HostInfo> {
     return this.#once(
       (id) => ({ id, kind: 'host-info' }),

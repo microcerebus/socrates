@@ -696,6 +696,28 @@ button.give-up:hover:not(:disabled) {
   color: var(--text);
 }
 
+/*
+ * The one control that destroys something. Outlined rather than filled: the
+ * error tokens are Catppuccin Red, and Latte's Red against Base is too close to
+ * carry a label, so the hue stays on the edge and the text stays `--text`.
+ */
+/* At a narrow panel width the caption drops below the button, never squeezes it. */
+.saved-data {
+  flex-wrap: wrap;
+}
+
+button.destructive {
+  border-color: var(--error-border);
+  /* A destructive control that has wrapped its own label reads as an accident. */
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+button.destructive:hover:not(:disabled) {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+}
+
 button.link {
   background: none;
   border: none;

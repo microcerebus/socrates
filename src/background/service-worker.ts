@@ -17,8 +17,14 @@ import { appError, type AppError, type PageSnapshot } from '../shared/types.ts';
 import { runInterviewTurn } from './interview.ts';
 import { getHostInfo, probeClaudeAccess } from './native-host-client.ts';
 import { claudeCodeProvider } from './providers.ts';
-import { getAttempts, getSettings, recordAttempt, setSettings } from './session-store.ts';
-import { clearSession, getSession, saveSession } from './transcript-store.ts';
+import {
+  clearAllAttempts,
+  getAttempts,
+  getSettings,
+  recordAttempt,
+  setSettings,
+} from './session-store.ts';
+import { clearAllSessions, clearSession, getSession, saveSession } from './transcript-store.ts';
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
@@ -183,6 +189,12 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'clear-session':
         void clearSession(message.slug)
           .then((session) => send({ kind: 'session', session }))
+          .catch(fail);
+        break;
+
+      case 'clear-all-data':
+        void Promise.all([clearAllSessions(), clearAllAttempts()])
+          .then(() => send({ kind: 'cleared' }))
           .catch(fail);
         break;
 

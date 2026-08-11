@@ -41,11 +41,24 @@ const capture = (args: string[]): string =>
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+/** Runs the CLI expecting it to fail, and returns everything it said. */
+function captureFailure(args: string[]): string {
+  try {
+    return capture(args);
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string };
+    return `${failure.stdout ?? ''}${failure.stderr ?? ''}`;
+  }
+}
+
+/** `--help` does not list this one, so it is pinned by invocation instead. */
+const UNDOCUMENTED_FLAGS = ['--system-prompt-file'];
+
 describe.skipIf(CLAUDE === null)('claude CLI contract (integration)', () => {
   it('still accepts every flag the host passes', () => {
     const help = capture(['--help']);
-    const flags = claudeArgs({ model: 'claude-sonnet-5', system: 'x' }).filter((arg) =>
-      arg.startsWith('--'),
+    const flags = claudeArgs({ model: 'claude-sonnet-5', systemPromptPath: '/tmp/x' }).filter(
+      (arg) => arg.startsWith('--') && !UNDOCUMENTED_FLAGS.includes(arg),
     );
 
     for (const flag of flags) {
@@ -56,9 +69,19 @@ describe.skipIf(CLAUDE === null)('claude CLI contract (integration)', () => {
     }
   });
 
+  it('still reads the system prompt from a file, which is how the host keeps it off argv', () => {
+    // Aimed at a path that cannot exist: the CLI reports the missing file
+    // without calling the API, which proves it parsed the flag and tried to read
+    // it. An unrecognised flag says "unknown option" instead - a different
+    // message, so this really does distinguish the two.
+    const said = captureFailure(['--print', '--system-prompt-file', '/nonexistent-socrates-probe']);
+    expect(said, 'claude no longer accepts --system-prompt-file').not.toContain('unknown option');
+    expect(said).toContain('/nonexistent-socrates-probe');
+  });
+
   it('still documents --system-prompt as replacing the prompt, not appending to it', () => {
     const help = capture(['--help']);
-    // Both exist; the host must be on the replacing one, or the coding-agent
+    // Both exist; the host must be on the replacing family, or the coding-agent
     // system prompt would sit underneath the rung rules.
     expect(help).toContain('--system-prompt <prompt>');
     expect(help).toContain('--append-system-prompt');

@@ -45,6 +45,11 @@ export async function recordAttempt(attempt: AttemptRecord): Promise<AttemptReco
   return next;
 }
 
+/** Deletes the whole session log. Settings are a preference, not data, and survive. */
+export async function clearAllAttempts(): Promise<void> {
+  await chrome.storage.local.remove(ATTEMPTS_KEY);
+}
+
 function isModelId(value: unknown): value is ModelId {
   return typeof value === 'string' && (MODEL_IDS as readonly string[]).includes(value);
 }

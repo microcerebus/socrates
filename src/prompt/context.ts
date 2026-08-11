@@ -6,11 +6,17 @@
  * changes between every message, so it belongs on the freshest turn; keeping the
  * system prompt free of it also makes the prompt a pure function of
  * (rung, language) and therefore stable across a session.
+ *
+ * Everything here that came off the page goes inside a `PageDataFence` and
+ * everything that is Socrates' own instruction stays outside one. That split is
+ * the point of the file: see `untrusted.ts` for why a scraped statement sitting
+ * unmarked next to `# TASK` is the whole rung ladder's problem.
  */
 
 import type { AskIntent, PageSnapshot, Rung } from '../shared/types.ts';
 import { TOTAL_HINTS, hintsUsedFor, rungSpec } from './rungs.ts';
 import { intentInstruction } from './system-prompt.ts';
+import { pageDataFence, type PageDataFence } from './untrusted.ts';
 
 const MAX_STATEMENT_CHARS = 8_000;
 const MAX_CODE_CHARS = 12_000;
@@ -35,6 +41,8 @@ export interface UserTurnInput {
   /** Free-form text from the chat box. May be empty for a pure ladder unlock. */
   message: string;
   elapsedMs: number;
+  /** Injected only by tests, which need the markers to be predictable. */
+  fence?: PageDataFence;
 }
 
 export function buildUserTurn({
@@ -43,28 +51,35 @@ export function buildUserTurn({
   intent,
   message,
   elapsedMs,
+  fence = pageDataFence(),
 }: UserTurnInput): string {
   const { problem, editor } = snapshot;
-  const sections: string[] = [];
+  const sections: string[] = [fence.preamble];
 
+  // `source` is Socrates' own account of where the text came from, so it stays
+  // outside the fence: it is the one line here the page must not be able to write.
   const heading = [
     `Title: ${problem.title}`,
     problem.difficulty ? `Difficulty: ${problem.difficulty}` : null,
     problem.url ? `URL: ${problem.url}` : null,
-    `Context source: ${problem.source === 'leetcode' ? 'read from the LeetCode page' : 'pasted by the user'}`,
   ]
     .filter(Boolean)
     .join('\n');
 
   sections.push(
-    `# PROBLEM\n${heading}\n\n## Statement\n${clamp(problem.statement.trim(), MAX_STATEMENT_CHARS)}`,
+    `# PROBLEM\n` +
+      `Context source: ${problem.source === 'leetcode' ? 'read from the LeetCode page' : 'pasted by the user'}\n` +
+      `${fence.block('heading', heading)}\n\n` +
+      `## Statement\n${fence.block('statement', clamp(problem.statement.trim(), MAX_STATEMENT_CHARS))}`,
   );
 
   if (problem.examples.length > 0) {
-    sections.push(`## Examples\n${problem.examples.join('\n\n')}`);
+    sections.push(`## Examples\n${fence.block('examples', problem.examples.join('\n\n'))}`);
   }
   if (problem.constraints.length > 0) {
-    sections.push(`## Constraints\n${problem.constraints.map((c) => `- ${c}`).join('\n')}`);
+    sections.push(
+      `## Constraints\n${fence.block('constraints', problem.constraints.map((c) => `- ${c}`).join('\n'))}`,
+    );
   }
 
   if (editor.source === 'unavailable' || editor.code.trim() === '') {
@@ -72,9 +87,13 @@ export function buildUserTurn({
       `# CURRENT EDITOR CODE\n(empty - the user has not written anything yet, or the editor could not be read)`,
     );
   } else {
+    // The buffer is fenced by the page-data markers rather than by backticks:
+    // it is code, code contains backticks, and a ``` in the buffer would close a
+    // Markdown fence and put the rest of the file back in prompt position.
     sections.push(
-      `# CURRENT EDITOR CODE (${editor.language}${editor.source === 'manual' ? ', pasted by the user' : ''})\n` +
-        `\`\`\`${editor.language}\n${clamp(editor.code, MAX_CODE_CHARS)}\n\`\`\``,
+      `# CURRENT EDITOR CODE${editor.source === 'manual' ? ' (pasted by the user)' : ''}\n` +
+        `${fence.block('editor-language', editor.language)}\n` +
+        `${fence.block('editor-code', clamp(editor.code, MAX_CODE_CHARS))}`,
     );
   }
 

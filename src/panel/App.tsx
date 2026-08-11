@@ -647,6 +647,23 @@ export function App(): ReactNode {
     }
   };
 
+  /*
+   * Clearing is not just a storage call: the panel is holding a view of what was
+   * just deleted. The attempt strip and any resume offer have to go with it, or
+   * the user is told their history is gone while still looking at it.
+   */
+  const onClearAllData = (): Promise<void> =>
+    client
+      .clearAllData()
+      .then(() => {
+        setAllAttempts([]);
+        setResumable(null);
+      })
+      .catch((failure: AppError) => {
+        setError(failure);
+        throw failure;
+      });
+
   const onProbeClaude = (): void => {
     setClaudeState('checking');
     client
@@ -699,6 +716,7 @@ export function App(): ReactNode {
           hostInfo={hostInfo}
           onSelectModel={onSelectModel}
           onProbeClaude={onProbeClaude}
+          onClearAllData={onClearAllData}
           onClose={() => setShowSettings(false)}
         />
       ) : showPaste ? (

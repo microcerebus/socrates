@@ -194,6 +194,18 @@ export function saveSession(session: StoredSession): Promise<StoredSession> {
   });
 }
 
+/**
+ * Deletes every stored transcript, for the user who wants what they typed into
+ * the editor off this machine. Goes through the same queue as everything else,
+ * so a save already in flight cannot land after the clear and resurrect a slug.
+ */
+export function clearAllSessions(): Promise<null> {
+  return enqueue(async () => {
+    await chrome.storage.local.remove(SESSIONS_KEY);
+    return null;
+  });
+}
+
 export function clearSession(slug: string): Promise<null> {
   return enqueue(async () => {
     const all = await readSessions();
