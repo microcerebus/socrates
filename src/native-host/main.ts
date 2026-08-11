@@ -121,7 +121,7 @@ function main(): void {
       void handleRequest(message, deps)
         .then(send)
         .catch((error: unknown) => {
-          send({ ok: false, code: 'key-fetch-failed', message: String(error) });
+          send({ ok: false, code: 'claude-cli-failed', message: String(error) });
         });
     }
   });

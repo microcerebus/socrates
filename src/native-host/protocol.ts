@@ -17,27 +17,15 @@ export const MAX_MESSAGE_BYTES = 1024 * 1024;
 
 export type HostRequest =
   | { kind: 'ping' }
-  | { kind: 'get-api-key' }
-  /** Checks the `claude` CLI is present and logged in. The Claude Code analogue of a vault probe. */
+  /** Checks the `claude` CLI is present and logged in. */
   | { kind: 'claude-probe' }
   | { kind: 'claude-start'; requestId: string; model: string; system: string; prompt: string }
   | { kind: 'claude-cancel'; requestId: string };
 
-export type HostFailureCode =
-  | 'dcli-missing'
-  | 'vault-locked'
-  | 'vault-logged-out'
-  | 'vault-item-missing'
-  | 'key-fetch-failed'
-  | 'claude-cli-missing'
-  | 'claude-logged-out'
-  | 'claude-usage-limit'
-  | 'claude-cli-failed'
-  | 'bad-request';
+export type HostFailureCode = 'claude-cli-missing' | 'claude-logged-out' | 'claude-usage-limit' | 'claude-cli-failed' | 'bad-request';
 
 export type HostResponse =
-  | { ok: true; kind: 'pong'; itemTitle: string; claudePath: string | null }
-  | { ok: true; kind: 'api-key'; apiKey: string }
+  | { ok: true; kind: 'pong'; claudePath: string | null }
   | { ok: true; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
   /** Sent once, when the CLI is up and about to call the API. */
   | { ok: true; kind: 'claude-started'; requestId: string }
@@ -93,7 +81,6 @@ export function isHostRequest(value: unknown): value is HostRequest {
   const record = value as Record<string, unknown>;
   switch (record['kind']) {
     case 'ping':
-    case 'get-api-key':
     case 'claude-probe':
       return true;
     case 'claude-start':

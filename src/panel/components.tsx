@@ -3,14 +3,12 @@ import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from '
 import { RUNGS, TOTAL_HINTS, hintsUsedFor, rungSpec } from '../prompt/rungs.ts';
 import {
   MODEL_CHOICES,
-  PROVIDER_CHOICES,
   type AppError,
   type AttemptRecord,
   type EditorContext,
   type ModelId,
   type PageSnapshot,
   type ProblemContext,
-  type ProviderId,
   type Rung,
   type StoredSession,
   type Turn,
@@ -310,9 +308,9 @@ export function Transcript({
  * The offer to pick a problem back up.
  *
  * Framed around what resuming saves rather than what it restores, because that
- * is the decision being made: on the Claude Code provider, starting fresh means
- * paying the same Max window again for hints already earned. The counts are
- * shown so the choice is informed rather than a guess.
+ * is the decision being made: starting fresh means paying the same Max window
+ * again for hints already earned. The counts are shown so the choice is
+ * informed rather than a guess.
  */
 export function ResumeOffer({
   session,
@@ -464,11 +462,9 @@ export function Composer({
 export type ProbeState = 'unknown' | 'checking' | 'ok' | 'failed';
 
 /**
- * The Claude Code half of Settings.
- *
- * The quota caveat is rendered from `PROVIDER_CHOICES`, not written twice: it is
- * the one thing about this provider a user can be genuinely surprised by, so it
- * sits under the choice whether or not the choice is selected.
+ * The one thing about hints a user can be genuinely surprised by: they draw on
+ * the same Max usage windows as every other Claude Code session on this
+ * machine. Shown unconditionally, not tucked behind a probe.
  */
 function ClaudeCodeAccess({
   state,
@@ -485,8 +481,12 @@ function ClaudeCodeAccess({
     <>
       <h3>Claude Code access</h3>
       <p className="small">
-        Nothing to set up beyond a logged-in CLI. Socrates runs <code>claude</code> through the same native helper
-        it uses for the vault, with tools switched off and the interviewer prompt as the entire system prompt.
+        Nothing to set up beyond a logged-in CLI. Socrates runs <code>claude</code> through a native helper, with
+        tools switched off and the interviewer prompt as the entire system prompt.
+      </p>
+      <p className="small">
+        Hints draw on the same Max usage windows as every other Claude Code session on this machine - it is one
+        pool, and interview sessions are small but not free of it.
       </p>
       <p className="small">
         Binary:{' '}
@@ -517,62 +517,21 @@ function ClaudeCodeAccess({
   );
 }
 
-function VaultAccess({
-  state,
-  vaultItemTitle,
-  onProbe,
-}: {
-  state: ProbeState;
-  vaultItemTitle: string | null;
-  onProbe: () => void;
-}): ReactNode {
-  return (
-    <>
-      <h3>API key</h3>
-      <p className="small">
-        Read from your Dashlane vault at session start through a native helper, and held in the service worker&rsquo;s
-        memory only. It is never written to extension storage or to disk.
-      </p>
-      <p className="small">
-        Dashlane item: {vaultItemTitle === null ? <em>checking&hellip;</em> : <code>{vaultItemTitle}</code>}
-        <br />
-        Change it in <code>~/.config/socrates/native-host.json</code>.
-      </p>
-      <div className="ladder-row">
-        <button type="button" onClick={onProbe} disabled={state === 'checking'}>
-          {state === 'checking' ? 'Checking…' : 'Test vault access'}
-        </button>
-        <span className="small">
-          {state === 'ok' ? 'Key loaded.' : state === 'failed' ? 'See the message above.' : ''}
-        </span>
-      </div>
-    </>
-  );
-}
-
 export function SettingsPanel({
-  provider,
   model,
-  keyState,
   claudeState,
   claudeAccess,
   hostInfo,
-  onSelectProvider,
   onSelectModel,
-  onProbeKey,
   onProbeClaude,
   onClose,
 }: {
-  provider: ProviderId;
   model: ModelId;
-  keyState: ProbeState;
   claudeState: ProbeState;
   claudeAccess: ClaudeAccess | null;
   /** What the native host is configured with, or null while unknown. */
   hostInfo: HostInfo | null;
-  onSelectProvider: (provider: ProviderId) => void;
   onSelectModel: (model: ModelId) => void;
-  onProbeKey: () => void;
   onProbeClaude: () => void;
   onClose: () => void;
 }): ReactNode {
@@ -584,25 +543,6 @@ export function SettingsPanel({
           close
         </button>
       </div>
-
-      <h3>Where replies come from</h3>
-      {PROVIDER_CHOICES.map((choice) => (
-        <label key={choice.id} className="choice">
-          <input
-            type="radio"
-            name="provider"
-            value={choice.id}
-            checked={provider === choice.id}
-            onChange={() => onSelectProvider(choice.id)}
-          />
-          <span>
-            <strong>{choice.label}</strong>
-            <small>{choice.blurb}</small>
-            <small className="caveat">{choice.caveat}</small>
-          </span>
-        </label>
-      ))}
-      <p className="small">Takes effect on your next message. The hint ladder behaves identically either way.</p>
 
       <h3>Model</h3>
       {MODEL_CHOICES.map((choice) => (
@@ -621,16 +561,7 @@ export function SettingsPanel({
         </label>
       ))}
 
-      {provider === 'claude-code' ? (
-        <ClaudeCodeAccess
-          state={claudeState}
-          access={claudeAccess}
-          claudePath={hostInfo?.claudePath ?? null}
-          onProbe={onProbeClaude}
-        />
-      ) : (
-        <VaultAccess state={keyState} vaultItemTitle={hostInfo?.itemTitle ?? null} onProbe={onProbeKey} />
-      )}
+      <ClaudeCodeAccess state={claudeState} access={claudeAccess} claudePath={hostInfo?.claudePath ?? null} onProbe={onProbeClaude} />
     </section>
   );
 }

@@ -1,26 +1,23 @@
 /**
- * The extension half of the Claude Code provider.
+ * The extension half of the Claude Code transport.
  *
- * The load-bearing claim in this file is that the provider is *only* a
- * transport: the same gated system prompt goes out, the same spoiler guard runs
- * over what comes back, and the same settings switch flips between the two
- * without anything else changing. Each of those is asserted against both
- * providers rather than trusted.
+ * The load-bearing claim in this file is that `interview.ts` sends the same
+ * gated system prompt regardless of transport, and that the spoiler guard runs
+ * over whatever comes back before it reaches the panel.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { ApiMessage } from '../src/background/anthropic.ts';
 import { streamClaudeCode, type NativePort } from '../src/background/claude-code.ts';
 import { hostFailureToAppError } from '../src/background/host-errors.ts';
 import { runInterviewTurn } from '../src/background/interview.ts';
-import { apiKeyProvider, claudeCodeProvider, flattenMessages } from '../src/background/providers.ts';
+import { claudeCodeProvider, flattenMessages, type ApiMessage } from '../src/background/providers.ts';
 import { getSettings, setSettings } from '../src/background/session-store.ts';
 import { createSettingsWriter } from '../src/panel/settings-writer.ts';
 import { WITHHELD_NOTICE } from '../src/prompt/spoiler-guard.ts';
 import type { HostResponse } from '../src/native-host/protocol.ts';
 import { DEFAULT_SETTINGS, appError, type AppError, type Rung, type Settings } from '../src/shared/types.ts';
-import { askRequest, mockAnthropic, sseBody } from './helpers.ts';
+import { askRequest } from './helpers.ts';
 
 // --- a native port that never leaves the process -----------------------------
 
@@ -283,8 +280,7 @@ describe('host failures the panel has to act on', () => {
     ['claude-logged-out', 'claude-logged-out'],
     ['claude-usage-limit', 'claude-usage-limit'],
     ['claude-cli-failed', 'claude-cli-failed'],
-    ['vault-logged-out', 'vault-locked'],
-    ['bad-request', 'key-fetch-failed'],
+    ['bad-request', 'claude-cli-failed'],
   ] as const)('maps %s onto %s', (hostCode, appCode) => {
     const error = hostFailureToAppError({ ok: false, code: hostCode, message: 'because', command: 'do-this' });
     expect(error.code).toBe(appCode);
@@ -296,7 +292,7 @@ describe('host failures the panel has to act on', () => {
   });
 });
 
-describe('the two providers are interchangeable', () => {
+describe('running an interview turn over the Claude Code transport', () => {
   const codeReply = ['Here it is.\n\n```js\n', 'const seen = new Map();\n', '```\n\nThat is the shape.'];
 
   /** Runs one turn on Claude Code, replaying `chunks` as the CLI's deltas. */
@@ -327,7 +323,7 @@ describe('the two providers are interchangeable', () => {
     expect(port.start.prompt).toContain('Unlocked rung: 1');
   });
 
-  it.each([0, 1, 2, 3] satisfies Rung[])('runs the spoiler guard over a rung %i Claude Code reply', async (rung) => {
+  it.each([0, 1, 2, 3] satisfies Rung[])('runs the spoiler guard over a rung %i reply', async (rung) => {
     const { output } = await viaClaudeCode(rung, codeReply);
     expect(output).not.toContain('new Map()');
     expect(output).not.toContain('```');
@@ -336,68 +332,25 @@ describe('the two providers are interchangeable', () => {
     expect(output).toContain('That is the shape.');
   });
 
-  it.each([4, 5] satisfies Rung[])('lets code through at rung %i on Claude Code too', async (rung) => {
+  it.each([4, 5] satisfies Rung[])('lets code through at rung %i', async (rung) => {
     const { output } = await viaClaudeCode(rung, codeReply);
     expect(output).toContain('const seen = new Map();');
   });
-
-  it('redacts identically on both providers, byte for byte', async () => {
-    const mock = mockAnthropic(sseBody(codeReply));
-    let viaApi = '';
-    await runInterviewTurn({
-      model: 'claude-sonnet-5',
-      request: askRequest({ rung: 2 }),
-      stream: apiKeyProvider({ apiKey: 'sk-test', fetchImpl: mock.impl }),
-      onText: (text) => {
-        viaApi += text;
-      },
-    });
-    const { output: viaCli } = await viaClaudeCode(2, codeReply);
-    expect(viaCli).toBe(viaApi);
-  });
-
-  it('sends the same system prompt to both', async () => {
-    const mock = mockAnthropic(sseBody(['ok']));
-    await runInterviewTurn({
-      model: 'claude-sonnet-5',
-      request: askRequest({ rung: 3 }),
-      stream: apiKeyProvider({ apiKey: 'sk-test', fetchImpl: mock.impl }),
-      onText: () => undefined,
-    });
-    const viaApi = (mock.calls[0]!.body['system'] as { text: string }[])[0]!.text;
-    const { port } = await viaClaudeCode(3, ['ok']);
-    expect(port.start.system).toBe(viaApi);
-  });
-
-  it('never reaches the vault on the Claude Code path', async () => {
-    const { port } = await viaClaudeCode(1, ['ok']);
-    for (const message of port.sent) {
-      expect((message as { kind: string }).kind).not.toBe('get-api-key');
-    }
-  });
 });
 
-describe('the provider setting', () => {
-  it('defaults to Claude Code', async () => {
-    expect(DEFAULT_SETTINGS.provider).toBe('claude-code');
+describe('the model setting', () => {
+  it('defaults to Sonnet 5', async () => {
+    expect(DEFAULT_SETTINGS.model).toBe('claude-sonnet-5');
     await expect(getSettings()).resolves.toEqual(DEFAULT_SETTINGS);
   });
 
-  it('round-trips a switch back to the API key', async () => {
-    await expect(setSettings({ provider: 'api-key', model: 'claude-opus-5' })).resolves.toEqual({
-      provider: 'api-key',
-      model: 'claude-opus-5',
-    });
-    await expect(getSettings()).resolves.toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+  it('round-trips a switch to another model', async () => {
+    await expect(setSettings({ model: 'claude-opus-5' })).resolves.toEqual({ model: 'claude-opus-5' });
+    await expect(getSettings()).resolves.toEqual({ model: 'claude-opus-5' });
   });
 
-  it('keeps the model when reading settings written before providers existed', async () => {
-    chromeStub.store['socrates:settings'] = { model: 'claude-opus-5' };
-    await expect(getSettings()).resolves.toEqual({ provider: 'claude-code', model: 'claude-opus-5' });
-  });
-
-  it('refuses a provider or model it does not know', async () => {
-    const stored = { provider: 'chatgpt', model: 'gpt-9' } as unknown as Parameters<typeof setSettings>[0];
+  it('refuses a model it does not know', async () => {
+    const stored = { model: 'gpt-9' } as unknown as Parameters<typeof setSettings>[0];
     await expect(setSettings(stored)).resolves.toEqual(DEFAULT_SETTINGS);
   });
 });
@@ -446,16 +399,16 @@ describe('saving a settings change', () => {
     };
   }
 
-  it('keeps both changes when provider and model are switched back to back', async () => {
+  it('keeps the latest choice when the model is switched twice back to back', async () => {
     const worker = fakeWorker();
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    worker.writer.adopt({ model: 'claude-sonnet-5' });
 
     // Faster than a round trip: the second handler used to read the state as it
     // was before the first, and write a whole object that undid it.
-    worker.writer.patch({ provider: 'api-key' });
     worker.writer.patch({ model: 'claude-opus-5' });
+    worker.writer.patch({ model: 'claude-haiku-4-5-20251001' });
 
-    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.displayed).toEqual({ model: 'claude-haiku-4-5-20251001' });
 
     await worker.settle();
     worker.pending[0]?.resolve();
@@ -463,57 +416,57 @@ describe('saving a settings change', () => {
     worker.pending[1]?.resolve();
     await worker.settle();
 
-    expect(worker.stored).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
-    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.stored).toEqual({ model: 'claude-haiku-4-5-20251001' });
+    expect(worker.displayed).toEqual({ model: 'claude-haiku-4-5-20251001' });
   });
 
   it('serialises writes, so the worker sees them in the order they were made', async () => {
     const worker = fakeWorker();
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    worker.writer.adopt({ model: 'claude-sonnet-5' });
 
-    worker.writer.patch({ provider: 'api-key' });
     worker.writer.patch({ model: 'claude-opus-5' });
+    worker.writer.patch({ model: 'claude-haiku-4-5-20251001' });
     await worker.settle();
 
     // The second write is not even issued until the first has answered, so the
     // worker cannot apply them out of order.
     expect(worker.pending).toHaveLength(1);
-    expect(worker.pending[0]?.settings).toEqual({ provider: 'api-key', model: 'claude-sonnet-5' });
+    expect(worker.pending[0]?.settings).toEqual({ model: 'claude-opus-5' });
 
     worker.pending[0]?.resolve();
     await worker.settle();
 
     expect(worker.pending).toHaveLength(2);
-    expect(worker.pending[1]?.settings).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.pending[1]?.settings).toEqual({ model: 'claude-haiku-4-5-20251001' });
   });
 
   it('ignores a reply that a later change has already superseded', async () => {
     const worker = fakeWorker();
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    worker.writer.adopt({ model: 'claude-sonnet-5' });
 
-    worker.writer.patch({ provider: 'api-key' });
+    worker.writer.patch({ model: 'claude-opus-5' });
     await worker.settle();
-    worker.writer.patch({ provider: 'claude-code' });
+    worker.writer.patch({ model: 'claude-sonnet-5' });
 
     // The first write answers after the user has already changed their mind.
     worker.pending[0]?.resolve();
     await worker.settle();
 
-    expect(worker.displayed?.provider).toBe('claude-code');
+    expect(worker.displayed?.model).toBe('claude-sonnet-5');
   });
 
   it('undoes the optimistic value when the write fails, and says why', async () => {
     const worker = fakeWorker();
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    worker.writer.adopt({ model: 'claude-sonnet-5' });
 
-    worker.writer.patch({ provider: 'api-key' });
-    expect(worker.displayed?.provider).toBe('api-key');
+    worker.writer.patch({ model: 'claude-opus-5' });
+    expect(worker.displayed?.model).toBe('claude-opus-5');
 
     await worker.settle();
     worker.pending[0]?.reject(appError('api-error', 'storage is full'));
     await worker.settle();
 
-    expect(worker.displayed).toEqual({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    expect(worker.displayed).toEqual({ model: 'claude-sonnet-5' });
     expect(worker.errors).toHaveLength(1);
     expect(worker.errors[0]?.message).toBe('storage is full');
   });
@@ -523,13 +476,13 @@ describe('saving a settings change', () => {
 
     // The panel asks for settings on mount and the sheet is one click away, so
     // the user can change something before the load answers.
-    worker.writer.patch({ provider: 'api-key' });
-    expect(worker.displayed?.provider).toBe('api-key');
+    worker.writer.patch({ model: 'claude-opus-5' });
+    expect(worker.displayed?.model).toBe('claude-opus-5');
 
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    worker.writer.adopt({ model: 'claude-sonnet-5' });
 
     // The load must not revert what the user just chose.
-    expect(worker.displayed?.provider).toBe('api-key');
+    expect(worker.displayed?.model).toBe('claude-opus-5');
 
     await worker.settle();
     worker.pending[0]?.resolve();
@@ -537,50 +490,50 @@ describe('saving a settings change', () => {
 
     // Nor may it orphan the write: the reply is still applied, so the panel and
     // storage agree without waiting for a reload.
-    expect(worker.displayed?.provider).toBe('api-key');
-    expect(worker.stored.provider).toBe('api-key');
-    expect(worker.writer.current.provider).toBe('api-key');
+    expect(worker.displayed?.model).toBe('claude-opus-5');
+    expect(worker.stored.model).toBe('claude-opus-5');
+    expect(worker.writer.current.model).toBe('claude-opus-5');
   });
 
   it('takes the stored value when the load arrives with nothing in flight', async () => {
     const worker = fakeWorker();
-    worker.writer.adopt({ provider: 'api-key', model: 'claude-opus-5' });
-    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    worker.writer.adopt({ model: 'claude-opus-5' });
+    expect(worker.displayed).toEqual({ model: 'claude-opus-5' });
   });
 
   it('rolls a later failure back to the stored value, not to the defaults', async () => {
     const worker = fakeWorker();
 
-    // Patch first, so `adopt` runs while a write is in flight and only updates
-    // the baseline. That baseline is what a failure must fall back to.
-    worker.writer.patch({ provider: 'api-key' });
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-opus-5' });
+    // Adopt after a write is already in flight, so it only updates the
+    // baseline. That baseline is what a failure must fall back to.
+    worker.writer.patch({ model: 'claude-opus-5' });
+    worker.writer.adopt({ model: 'claude-haiku-4-5-20251001' });
     await worker.settle();
     worker.pending[0]?.resolve();
     await worker.settle();
 
-    worker.writer.patch({ model: 'claude-haiku-4-5-20251001' });
+    worker.writer.patch({ model: 'claude-sonnet-5' });
     await worker.settle();
     worker.pending[1]?.reject(appError('api-error', 'storage is full'));
     await worker.settle();
 
-    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-sonnet-5' });
+    expect(worker.displayed).toEqual({ model: 'claude-opus-5' });
     expect(worker.errors).toHaveLength(1);
   });
 
   it('does not undo anything when a newer change is already on its way', async () => {
     const worker = fakeWorker();
-    worker.writer.adopt({ provider: 'claude-code', model: 'claude-sonnet-5' });
+    worker.writer.adopt({ model: 'claude-sonnet-5' });
 
-    worker.writer.patch({ provider: 'api-key' });
-    await worker.settle();
     worker.writer.patch({ model: 'claude-opus-5' });
+    await worker.settle();
+    worker.writer.patch({ model: 'claude-haiku-4-5-20251001' });
 
     worker.pending[0]?.reject(appError('api-error', 'transient'));
     await worker.settle();
 
     // The newer intent stands; only the failure is reported.
-    expect(worker.displayed).toEqual({ provider: 'api-key', model: 'claude-opus-5' });
+    expect(worker.displayed).toEqual({ model: 'claude-haiku-4-5-20251001' });
     expect(worker.errors).toHaveLength(1);
   });
 });

@@ -16,8 +16,7 @@ import { createSpoilerGuard } from '../prompt/spoiler-guard.ts';
 import { buildSystemPrompt } from '../prompt/system-prompt.ts';
 import type { AskRequest } from '../shared/protocol.ts';
 import type { ModelId } from '../shared/types.ts';
-import type { ApiMessage } from './anthropic.ts';
-import type { ProviderStream } from './providers.ts';
+import type { ApiMessage, ProviderStream } from './providers.ts';
 
 const MAX_HISTORY_TURNS = 12;
 

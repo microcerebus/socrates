@@ -1,6 +1,5 @@
 /**
- * The extension's service worker: the only place with the API key, and the only
- * place that talks to Anthropic.
+ * The extension's service worker: the only place that talks to the native host.
  *
  * It owns three jobs - capture page context, run a guarded model turn, and read
  * or write the session log. The panel drives all three over one port.
@@ -14,10 +13,10 @@ import {
   type PanelRequest,
   type WorkerFrameBody,
 } from '../shared/protocol.ts';
-import { appError, type AppError, type PageSnapshot, type Settings } from '../shared/types.ts';
+import { appError, type AppError, type PageSnapshot } from '../shared/types.ts';
 import { runInterviewTurn } from './interview.ts';
-import { getApiKey, getHostInfo, probeClaudeAccess } from './keychain.ts';
-import { apiKeyProvider, claudeCodeProvider, type ProviderStream } from './providers.ts';
+import { getHostInfo, probeClaudeAccess } from './native-host-client.ts';
+import { claudeCodeProvider } from './providers.ts';
 import { getAttempts, getSettings, recordAttempt, setSettings } from './session-store.ts';
 import { clearSession, getSession, saveSession } from './transcript-store.ts';
 
@@ -67,18 +66,7 @@ async function capture(tabId: number): Promise<{ snapshot: PageSnapshot | null; 
   };
 }
 
-/**
- * Settings are read per ask rather than cached, so switching provider or model
- * takes effect on the very next message with no reload.
- *
- * The key fetch only happens on the API-key provider - on Claude Code the vault
- * is never touched, which is the point of it.
- */
-async function providerFor(settings: Settings): Promise<ProviderStream> {
-  if (settings.provider === 'claude-code') return claudeCodeProvider();
-  return apiKeyProvider({ apiKey: await getApiKey() });
-}
-
+/** Settings are read per ask rather than cached, so switching model takes effect on the very next message. */
 async function runAsk(
   request: AskRequest,
   emit: (frame: WorkerFrameBody) => void,
@@ -87,7 +75,7 @@ async function runAsk(
   const settings = await getSettings();
   await runInterviewTurn({
     model: settings.model,
-    stream: await providerFor(settings),
+    stream: claudeCodeProvider(),
     request,
     signal,
     onStarted: () => emit({ kind: 'started' }),
@@ -178,12 +166,6 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'clear-session':
         void clearSession(message.slug)
           .then((session) => send({ kind: 'session', session }))
-          .catch(fail);
-        break;
-
-      case 'probe-key':
-        void getApiKey()
-          .then(() => send({ kind: 'key-ok' }))
           .catch(fail);
         break;
 
