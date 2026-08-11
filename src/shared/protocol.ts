@@ -46,6 +46,16 @@ export type PanelRequest =
   | { id: number; kind: 'get-session'; slug: string }
   | { id: number; kind: 'save-session'; session: StoredSession }
   | { id: number; kind: 'clear-session'; slug: string }
+  /**
+   * Deletes every saved transcript and the whole session log. Settings survive.
+   *
+   * `activeFrom` is the `startedAt` of the session the panel is beginning in the
+   * same tick as the click. It is the boundary the worker refuses writes against:
+   * a turn finishing afterwards still carries the identity it started with, and
+   * without this the panel would write the session the user just deleted back on
+   * to disk. See `src/background/clear-boundary.ts`.
+   */
+  | { id: number; kind: 'clear-all-data'; activeFrom: string }
   | { id: number; kind: 'probe-claude' }
   | { id: number; kind: 'host-info' };
 
@@ -70,6 +80,8 @@ export type WorkerFrame =
     }
   | { id: number; kind: 'host-info'; claudePath: string | null }
   | { id: number; kind: 'ack' }
+  /** Every saved transcript and attempt is gone. */
+  | { id: number; kind: 'cleared' }
   | { id: number; kind: 'error'; error: AppError };
 
 /** `Omit` over a union collapses it to the shared keys; this keeps the members apart. */

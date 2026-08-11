@@ -14,11 +14,18 @@ import {
   type WorkerFrameBody,
 } from '../shared/protocol.ts';
 import { appError, type AppError, type PageSnapshot } from '../shared/types.ts';
+import { markClearAll } from './clear-boundary.ts';
 import { runInterviewTurn } from './interview.ts';
 import { getHostInfo, probeClaudeAccess } from './native-host-client.ts';
 import { claudeCodeProvider } from './providers.ts';
-import { getAttempts, getSettings, recordAttempt, setSettings } from './session-store.ts';
-import { clearSession, getSession, saveSession } from './transcript-store.ts';
+import {
+  clearAllAttempts,
+  getAttempts,
+  getSettings,
+  recordAttempt,
+  setSettings,
+} from './session-store.ts';
+import { clearAllSessions, clearSession, getSession, saveSession } from './transcript-store.ts';
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
@@ -183,6 +190,16 @@ chrome.runtime.onConnect.addListener((port) => {
       case 'clear-session':
         void clearSession(message.slug)
           .then((session) => send({ kind: 'session', session }))
+          .catch(fail);
+        break;
+
+      case 'clear-all-data':
+        // Marked synchronously, before either store is touched: a write landing
+        // while the clear runs has to be judged against the new boundary, not
+        // the old one.
+        markClearAll(message.activeFrom);
+        void Promise.all([clearAllSessions(), clearAllAttempts()])
+          .then(() => send({ kind: 'cleared' }))
           .catch(fail);
         break;
 

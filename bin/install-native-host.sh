@@ -4,10 +4,14 @@
 #
 #   ./bin/install-native-host.sh [extension-id ...]
 #
-# The manifest pins a public key, so the extension id is stable no matter where
-# dist/ lives. Both known ids are registered by default, and re-running merges
-# rather than clobbers: any id already present in an installed manifest is kept.
+# The manifest pins a public key, so the extension id is a pure function of that
+# key and is the same in every Chromium flavour. This script derives it rather
+# than carrying a list, and each run states the whole allowlist: an id this run
+# did not resolve is removed from the installed manifest, not kept.
 # Re-run after installing or moving the claude CLI.
+#
+# `allowed_origins` is the host's only access control - anything listed there can
+# run the user's claude CLI - so converging it is a security property, not tidying.
 #
 # Nothing secret is written. The host manifest points Chrome at a launcher; the
 # launcher runs a Node script that streams a reply from the `claude` CLI.
@@ -15,20 +19,25 @@
 set -euo pipefail
 
 HOST_NAME="com.socrates.keychain"
-# Derived from the public key pinned in public/manifest.json. Chrome and Brave
-# have each been seen to hand this build a different id, so both are registered.
-DEFAULT_EXTENSION_IDS=(
-  "lbhnejceegeplldfheefbalbfnhdafnb"
-  "aplbkajcnpggamonmlebeaenjhhnjpdp"
-)
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOST_SCRIPT="$REPO_ROOT/dist/native-host/socrates-host.mjs"
 LAUNCHER="$REPO_ROOT/dist/native-host/socrates-host"
+MANIFEST_JSON="$REPO_ROOT/public/manifest.json"
+ID_SCRIPT="$REPO_ROOT/scripts/extension-id.ts"
+MANIFEST_SCRIPT="$REPO_ROOT/scripts/native-host-manifest.ts"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/socrates"
 CONFIG_FILE="$CONFIG_DIR/native-host.json"
 
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 
+[ -f "$HOST_SCRIPT" ] || die "missing $HOST_SCRIPT - run 'pnpm build' first"
+
+NODE_BIN="$(command -v node || true)"
+[ -n "$NODE_BIN" ] || die "node is not on PATH"
+
+# The id comes from the key pinned in public/manifest.json, so the extension the
+# host trusts and the extension Chrome loads cannot drift apart. An override is
+# still accepted for an unpinned development build.
 if [ "$#" -gt 0 ]; then
   EXTENSION_IDS=("$@")
 elif [ -n "${SOCRATES_EXTENSION_IDS:-}" ]; then
@@ -37,17 +46,12 @@ elif [ -n "${SOCRATES_EXTENSION_IDS:-}" ]; then
 elif [ -n "${SOCRATES_EXTENSION_ID:-}" ]; then
   EXTENSION_IDS=("$SOCRATES_EXTENSION_ID")
 else
-  EXTENSION_IDS=("${DEFAULT_EXTENSION_IDS[@]}")
+  EXTENSION_IDS=("$("$NODE_BIN" "$ID_SCRIPT" "$MANIFEST_JSON")")
 fi
 
 for id in "${EXTENSION_IDS[@]}"; do
   [[ "$id" =~ ^[a-p]{32}$ ]] || die "'$id' is not a Chrome extension id (32 letters a-p)"
 done
-
-[ -f "$HOST_SCRIPT" ] || die "missing $HOST_SCRIPT - run 'pnpm build' first"
-
-NODE_BIN="$(command -v node || true)"
-[ -n "$NODE_BIN" ] || die "node is not on PATH"
 
 CLAUDE_BIN="$(command -v claude || true)"
 if [ -z "$CLAUDE_BIN" ]; then
@@ -86,40 +90,11 @@ case "$(uname -s)" in
     ;;
 esac
 
-# Written by node rather than a heredoc so an existing manifest's allowed_origins
-# can be read and merged: registering one browser must not deregister another.
+# Written by scripts/native-host-manifest.ts, which states the whole allowlist
+# and reports whatever it withdrew. See that file for why it replaces rather
+# than merges.
 write_manifest() {
-  "$NODE_BIN" - "$1" "$HOST_NAME" "$LAUNCHER" "${EXTENSION_IDS[@]}" <<'NODE'
-const { readFileSync, writeFileSync } = require('node:fs');
-const [file, hostName, launcher, ...ids] = process.argv.slice(2);
-
-let existing = [];
-try {
-  const previous = JSON.parse(readFileSync(file, 'utf8'));
-  if (Array.isArray(previous.allowed_origins)) existing = previous.allowed_origins;
-} catch {
-  /* no manifest yet, or an unreadable one we are about to replace */
-}
-
-const wanted = ids.map((id) => `chrome-extension://${id}/`);
-const allowed_origins = [...new Set([...existing, ...wanted])];
-
-writeFileSync(
-  file,
-  `${JSON.stringify(
-    {
-      name: hostName,
-      description: 'Runs the Claude Code CLI for Socrates, headlessly.',
-      path: launcher,
-      type: 'stdio',
-      allowed_origins,
-    },
-    null,
-    2,
-  )}\n`,
-);
-console.log(`${allowed_origins.length} origin(s)`);
-NODE
+  "$NODE_BIN" "$MANIFEST_SCRIPT" "$1" "$HOST_NAME" "$LAUNCHER" "${EXTENSION_IDS[@]}"
 }
 
 INSTALLED=0

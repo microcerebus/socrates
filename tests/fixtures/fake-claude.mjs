@@ -13,13 +13,20 @@
  */
 
 import process from 'node:process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setInterval } from 'node:timers';
 
 const args = process.argv.slice(2);
 const model = args[args.indexOf('--model') + 1] ?? '';
-const pidFile = process.env.FAKE_CLAUDE_PIDFILE;
-if (pidFile) writeFileSync(pidFile, String(process.pid), 'utf8');
+
+/**
+ * The pid goes in the run's own cwd, under the name the cancellation test looks
+ * for, rather than at a path passed in the environment: the host now gives the
+ * child an allowlisted environment, so a test variable would not survive the
+ * trip. cwd is a scratch directory the runner already controls.
+ */
+writeFileSync(join(process.cwd(), 'fake-claude.pid'), String(process.pid), 'utf8');
 
 const say = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 const delta = (text) =>
@@ -79,8 +86,13 @@ switch (model) {
   }
 
   case 'scenario-echo': {
-    // Proves the real argv and the real stdin reached the process.
-    delta(JSON.stringify({ args, prompt }));
+    // Proves the real argv, the real stdin and the real child environment
+    // reached the process - and that the system prompt arrived as a file only
+    // this user can read rather than as an argv element `ps` would show.
+    const promptFile = args[args.indexOf('--system-prompt-file') + 1];
+    const systemPrompt = promptFile ? readFileSync(promptFile, 'utf8') : null;
+    const systemPromptMode = promptFile ? (statSync(promptFile).mode & 0o777).toString(8) : null;
+    delta(JSON.stringify({ args, prompt, env: process.env, systemPrompt, systemPromptMode }));
     result({ is_error: false, result: 'echoed' });
     break;
   }

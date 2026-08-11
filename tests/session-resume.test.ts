@@ -21,13 +21,28 @@ import {
   coerceSession,
   getSession,
   normaliseSession,
+  clearAllSessions,
   pruneSessions,
   saveSession,
 } from '../src/background/transcript-store.ts';
+import {
+  clearAllAttempts,
+  getAttempts,
+  getSettings,
+  recordAttempt,
+  setSettings,
+} from '../src/background/session-store.ts';
+import { clearMark, markClearAll, resetClearBoundary } from '../src/background/clear-boundary.ts';
 import { classifyCapture } from '../src/panel/problem-switch.ts';
 import { createSessionWriter } from '../src/panel/session-writer.ts';
 import { hintsUsedFor } from '../src/prompt/rungs.ts';
-import type { PageSnapshot, Rung, StoredSession, Turn } from '../src/shared/types.ts';
+import type {
+  AttemptRecord,
+  PageSnapshot,
+  Rung,
+  StoredSession,
+  Turn,
+} from '../src/shared/types.ts';
 import { SNAPSHOT } from './helpers.ts';
 
 /**
@@ -50,6 +65,10 @@ function stubChrome(): Record<string, unknown> {
           Object.assign(store, values);
           return later(undefined);
         },
+        remove: (key: string) => {
+          delete store[key];
+          return later(undefined);
+        },
       },
     },
   };
@@ -58,6 +77,7 @@ function stubChrome(): Record<string, unknown> {
 
 beforeEach(() => {
   stubChrome();
+  resetClearBoundary();
 });
 
 function turn(role: 'user' | 'assistant', text: string, rung: Rung = 0): Turn {
@@ -378,6 +398,20 @@ describe('discarding a session', () => {
     w.save(session({ rung: 4, deepestRung: 4 }));
 
     expect(cleared).toEqual(['two-sum']);
+    expect(saved).toHaveLength(0);
+  });
+
+  /*
+   * "Clear all saved data" has the same problem as "start fresh", one step
+   * bigger: the panel is still holding a live session for the problem on screen,
+   * so a finishing turn or a `pagehide` would put the transcript the user just
+   * deleted straight back on disk. The panel discards the active slug in the same
+   * tick as the click, before the clear round trip starts.
+   */
+  it('refuses the save that would recreate a transcript just cleared', () => {
+    const { writer: w, saved } = writer();
+    w.discard('two-sum');
+    w.save(session({ rung: 3, deepestRung: 3 }));
     expect(saved).toHaveLength(0);
   });
 
@@ -782,5 +816,161 @@ describe('rapid navigation with out-of-order resolutions', () => {
     // The later navigation to C arrives as its own event.
     await follow(w, page('b'), pageReader([], page('c')), adopt);
     expect(w.active).toBe('c');
+  });
+});
+
+/**
+ * Transcripts hold the user's own editor buffer, unencrypted, for up to
+ * `MAX_SESSIONS` problems, and until now the only way to remove one was
+ * per-problem through a resume offer. "Clear all saved data" in Settings is the
+ * answer to "get this off my machine", so it has to actually clear all of it.
+ */
+describe('clearing everything the extension has saved', () => {
+  it('removes every transcript, not only the problem on screen', async () => {
+    await saveSession(session({ slug: 'two-sum', turns: [turn('user', 'a')] }));
+    await saveSession(session({ slug: 'three-sum', turns: [turn('user', 'b')] }));
+
+    await clearAllSessions();
+
+    expect(await getSession('two-sum')).toBeNull();
+    expect(await getSession('three-sum')).toBeNull();
+  });
+
+  it('removes the session log too', async () => {
+    await recordAttempt({
+      slug: 'two-sum',
+      title: '1. Two Sum',
+      startedAt: '2026-08-11T10:00:00.000Z',
+      durationMs: 60_000,
+      deepestRung: 2,
+      hintsUsed: hintsUsedFor(2),
+    });
+    expect(await getAttempts('two-sum')).toHaveLength(1);
+
+    await clearAllAttempts();
+
+    expect(await getAttempts('two-sum')).toEqual([]);
+  });
+
+  it('cannot be undone by a save that was already in flight', async () => {
+    // The panel saves on `pagehide` and on every finished turn, so a save and a
+    // clear really can overlap. Both go through the one queue, in call order.
+    const saving = saveSession(session({ slug: 'two-sum', turns: [turn('user', 'a')] }));
+    const clearing = clearAllSessions();
+    await Promise.all([saving, clearing]);
+
+    expect(await getSession('two-sum')).toBeNull();
+  });
+
+  it('leaves the settings alone: a model choice is a preference, not saved data', async () => {
+    await setSettings({ model: 'claude-haiku-4-5-20251001' });
+    await clearAllSessions();
+    await clearAllAttempts();
+    expect((await getSettings()).model).toBe('claude-haiku-4-5-20251001');
+  });
+});
+
+/**
+ * "Clear all saved data" against the writers that were already in motion.
+ *
+ * Two writers are mid-flight whenever the user clicks: the turn that is about to
+ * finish, and the `pagehide` save. Serialising them behind the clear settles the
+ * ordering, but not the case that actually bites - `onDone` in `App.tsx` fires
+ * from a closure built when the turn *started*, so it is issued after the clear,
+ * arrives after it, and still describes the session the user just deleted. The
+ * boundary is therefore an identity rather than an instant; see
+ * `src/background/clear-boundary.ts`.
+ */
+describe('clearing while a session is live', () => {
+  const BEFORE = '2026-08-11T09:00:00.000Z';
+  const CLEARED_AT = '2026-08-11T09:30:00.000Z';
+
+  function attempt(startedAt: string, overrides: Partial<AttemptRecord> = {}): AttemptRecord {
+    return {
+      slug: 'two-sum',
+      title: '1. Two Sum',
+      startedAt,
+      durationMs: 60_000,
+      deepestRung: 2,
+      hintsUsed: hintsUsedFor(2),
+      ...overrides,
+    };
+  }
+
+  /* The reported bug: a turn finishing after the clear recreates the row. */
+  it('refuses an attempt write for the session that was just deleted', async () => {
+    await recordAttempt(attempt(BEFORE));
+    markClearAll(CLEARED_AT);
+    await clearAllAttempts();
+
+    // The panel's `onDone` closure still carries the pre-clear identity.
+    const after = await recordAttempt(attempt(BEFORE, { deepestRung: 5, durationMs: 900_000 }));
+
+    expect(after).toEqual([]);
+    expect(await getAttempts('two-sum')).toEqual([]);
+  });
+
+  it('still writes the session the panel started instead', async () => {
+    markClearAll(CLEARED_AT);
+    await clearAllAttempts();
+
+    // The panel resets in the same tick as the click, so the replacement session
+    // carries exactly the identity the clear was marked with.
+    const same = await recordAttempt(attempt(CLEARED_AT));
+    expect(same).toHaveLength(1);
+
+    const later = await recordAttempt(attempt('2026-08-11T10:00:00.000Z', { slug: 'three-sum' }));
+    expect(later).toHaveLength(1);
+  });
+
+  it('refuses an attempt write that was already in flight when the clear landed', async () => {
+    const writing = recordAttempt(attempt(BEFORE));
+    markClearAll(CLEARED_AT);
+    const clearing = clearAllAttempts();
+    await Promise.all([writing, clearing]);
+
+    expect(await getAttempts('two-sum')).toEqual([]);
+  });
+
+  it('refuses the transcript half on the same terms', async () => {
+    await saveSession(session({ startedAt: BEFORE }));
+    markClearAll(CLEARED_AT);
+    await clearAllSessions();
+
+    expect(await saveSession(session({ startedAt: BEFORE, rung: 5, deepestRung: 5 }))).toBeNull();
+    expect(await getSession('two-sum')).toBeNull();
+
+    expect(await saveSession(session({ startedAt: CLEARED_AT }))).not.toBeNull();
+    expect((await getSession('two-sum'))?.startedAt).toBe(CLEARED_AT);
+  });
+
+  it('only ever moves the boundary forward', () => {
+    markClearAll(CLEARED_AT);
+    markClearAll(BEFORE);
+    expect(clearMark().activeFrom).toBe(CLEARED_AT);
+    expect(clearMark().epoch).toBe(2);
+  });
+
+  /*
+   * The attempt log is a read-modify-write over one key, so two overlapping
+   * upserts used to read the same "before" and the second `set` dropped the
+   * first. That is the same bug the transcript store queued its way out of.
+   */
+  it('does not lose one of two overlapping attempt writes', async () => {
+    await Promise.all([
+      recordAttempt(attempt('2026-08-11T11:00:00.000Z')),
+      recordAttempt(attempt('2026-08-11T11:05:00.000Z')),
+      recordAttempt(attempt('2026-08-11T11:10:00.000Z', { slug: 'three-sum' })),
+    ]);
+
+    expect(await getAttempts('two-sum')).toHaveLength(2);
+    expect(await getAttempts('three-sum')).toHaveLength(1);
+  });
+
+  it('leaves settings alone: they are a preference, not a write in this race', async () => {
+    await setSettings({ model: 'claude-opus-5' });
+    markClearAll(CLEARED_AT);
+    await Promise.all([clearAllSessions(), clearAllAttempts()]);
+    expect((await getSettings()).model).toBe('claude-opus-5');
   });
 });

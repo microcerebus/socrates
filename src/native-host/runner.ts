@@ -9,12 +9,16 @@
  */
 
 import type { spawn as nodeSpawn, ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import process from 'node:process';
 
 import {
   ASSISTANT_RESULT_SUBTYPE,
-  CLAUDE_ENV,
   LineSplitter,
   claudeArgs,
+  claudeEnv,
   parseClaudeLine,
   type RateLimitState,
 } from './claude.ts';
@@ -48,6 +52,27 @@ export interface ClaudeRunDeps extends HostDeps {
 
 export type ClaudeStartRequest = Extract<HostRequest, { kind: 'claude-start' }>;
 
+export interface SystemPromptFile {
+  path: string;
+  /** Removes the file and its directory. Safe to call more than once. */
+  cleanup: () => void;
+}
+
+/**
+ * Puts the system prompt on disk, for the one run that is about to read it.
+ *
+ * The alternative is `--system-prompt`, which puts the whole prompt on argv
+ * where `ps -ww -o args` shows it to every process running as this user. A
+ * private temp directory (0700) holding a 0600 file is not readable that way,
+ * and it is removed as soon as the run ends however it ends.
+ */
+export function writeSystemPromptFile(system: string): SystemPromptFile {
+  const dir = mkdtempSync(join(tmpdir(), 'socrates-prompt-'));
+  const path = join(dir, 'system-prompt.md');
+  writeFileSync(path, system, { encoding: 'utf8', mode: 0o600 });
+  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 function killChild(child: ChildProcess): void {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill('SIGTERM');
@@ -73,15 +98,29 @@ export function startClaudeRun(
     return () => undefined;
   }
 
-  const child = deps.spawn(
-    lookup.path,
-    claudeArgs({ model: request.model, system: request.system }),
-    {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: deps.cwd,
-      env: { ...process.env, ...CLAUDE_ENV },
-    },
-  );
+  const systemPrompt = writeSystemPromptFile(request.system);
+
+  let child: ChildProcess;
+  try {
+    child = deps.spawn(
+      lookup.path,
+      claudeArgs({ model: request.model, systemPromptPath: systemPrompt.path }),
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: deps.cwd,
+        env: claudeEnv(process.env),
+      },
+    );
+  } catch (error) {
+    systemPrompt.cleanup();
+    emit({
+      ok: false,
+      code: 'claude-cli-failed',
+      message: `Could not run ${lookup.path}: ${String(error)}`,
+      requestId,
+    });
+    return () => undefined;
+  }
 
   const splitter = new LineSplitter();
   let rateLimit: RateLimitState | null = null;
@@ -171,6 +210,7 @@ export function startClaudeRun(
 
   child.on('close', () => {
     clearTimeout(timer);
+    systemPrompt.cleanup();
     for (const line of splitter.flush()) consume(line);
     if (cancelled) return;
 
@@ -226,5 +266,9 @@ export function startClaudeRun(
     cancelled = true;
     clearTimeout(timer);
     killChild(child);
+    // `close` still fires and cleans up too; doing it here as well means a run
+    // the user called off does not leave the prompt on disk while the child
+    // takes its grace period to die.
+    systemPrompt.cleanup();
   };
 }

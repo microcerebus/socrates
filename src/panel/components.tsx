@@ -570,6 +570,77 @@ function ClaudeCodeAccess({
   );
 }
 
+type ClearState = 'idle' | 'confirming' | 'clearing' | 'cleared';
+
+/**
+ * Says what is kept, and offers the only way to get rid of all of it.
+ *
+ * Transcripts hold the problem statement, every hint and the user's own editor
+ * buffer, unencrypted in `chrome.storage.local`, for up to 24 problems. Until
+ * now the only way to remove one was "Start fresh" on a resume offer, one
+ * problem at a time, which is not an answer to "get this off my machine".
+ *
+ * It clears the session in progress too, not only what is already on disk: the
+ * panel is holding a live transcript, and leaving it there would mean the next
+ * finished turn wrote it back. The caption says so, because losing the rung you
+ * are standing on is not what "clear saved data" sounds like on its own.
+ *
+ * The click is deliberately two-step: the button says what it will do, and the
+ * confirmation is a second, differently-labelled control. There is no undo.
+ */
+function SavedData({ onClear }: { onClear: () => Promise<void> }): ReactNode {
+  const [state, setState] = useState<ClearState>('idle');
+
+  return (
+    <>
+      <h3>Saved data</h3>
+      <p className="small">
+        Socrates keeps one transcript per problem (statement, hints and your editor buffer) and a
+        log of past attempts, in this browser&apos;s local storage on this machine. Nothing is sent
+        anywhere except to your own <code>claude</code> CLI when you ask for a hint.
+      </p>
+      <div className="ladder-row saved-data">
+        {state === 'confirming' ? (
+          <>
+            <button
+              type="button"
+              className="destructive"
+              onClick={() => {
+                setState('clearing');
+                onClear().then(
+                  () => setState('cleared'),
+                  () => setState('idle'),
+                );
+              }}
+            >
+              Delete everything
+            </button>
+            <button type="button" className="ghost" onClick={() => setState('idle')}>
+              Keep it
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="destructive"
+              disabled={state === 'clearing'}
+              onClick={() => setState('confirming')}
+            >
+              Clear all saved data
+            </button>
+            <span className="small">
+              {state === 'cleared'
+                ? 'Deleted. Your model choice is kept.'
+                : 'Transcripts, attempt history, and the session you are in. No undo.'}
+            </span>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function SettingsPanel({
   model,
   claudeState,
@@ -577,6 +648,7 @@ export function SettingsPanel({
   hostInfo,
   onSelectModel,
   onProbeClaude,
+  onClearAllData,
   onClose,
 }: {
   model: ModelId;
@@ -586,6 +658,7 @@ export function SettingsPanel({
   hostInfo: HostInfo | null;
   onSelectModel: (model: ModelId) => void;
   onProbeClaude: () => void;
+  onClearAllData: () => Promise<void>;
   onClose: () => void;
 }): ReactNode {
   return (
@@ -620,6 +693,8 @@ export function SettingsPanel({
         claudePath={hostInfo?.claudePath ?? null}
         onProbe={onProbeClaude}
       />
+
+      <SavedData onClear={onClearAllData} />
     </section>
   );
 }

@@ -9,9 +9,9 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,8 +20,10 @@ import {
   ASSISTANT_RESULT_SUBTYPE,
   CLAUDE_ENV,
   CLAUDE_LOGIN_COMMAND,
+  INHERITED_ENV_VARS,
   LineSplitter,
   claudeArgs,
+  claudeEnv,
   formatResetTime,
   isRateLimited,
   parseAuthStatus,
@@ -80,7 +82,10 @@ function hostDeps(
 }
 
 describe('the invocation', () => {
-  const args = claudeArgs({ model: 'claude-sonnet-5', system: 'SYSTEM PROMPT' });
+  const args = claudeArgs({
+    model: 'claude-sonnet-5',
+    systemPromptPath: '/tmp/x/system-prompt.md',
+  });
   const flag = (name: string): string | undefined => args[args.indexOf(name) + 1];
 
   it('runs in print mode with streamed JSON, which is the only way to get text deltas', () => {
@@ -91,9 +96,19 @@ describe('the invocation', () => {
   });
 
   it('makes the interviewer prompt the whole system prompt, not an addendum', () => {
-    expect(flag('--system-prompt')).toBe('SYSTEM PROMPT');
+    expect(flag('--system-prompt-file')).toBe('/tmp/x/system-prompt.md');
     // --append-system-prompt would leave Claude Code's coding-agent prompt underneath.
     expect(args).not.toContain('--append-system-prompt');
+    expect(args).not.toContain('--append-system-prompt-file');
+  });
+
+  it('never puts the system prompt itself on argv, which `ps` shows to any local process', () => {
+    const withSecret = claudeArgs({
+      model: 'claude-sonnet-5',
+      systemPromptPath: '/tmp/x/system-prompt.md',
+    });
+    expect(withSecret).not.toContain('--system-prompt');
+    expect(withSecret.join(' ')).not.toContain('You are Socrates');
   });
 
   it('leaves the session with no tools at all', () => {
@@ -119,13 +134,42 @@ describe('the invocation', () => {
 
   it('passes the settings model id straight through', () => {
     expect(flag('--model')).toBe('claude-sonnet-5');
-    expect(claudeArgs({ model: 'claude-haiku-4-5-20251001', system: '' })).toContain(
-      'claude-haiku-4-5-20251001',
-    );
+    expect(
+      claudeArgs({ model: 'claude-haiku-4-5-20251001', systemPromptPath: '/tmp/x' }),
+    ).toContain('claude-haiku-4-5-20251001');
   });
 
   it('suppresses the side calls a headless run does not need', () => {
     expect(CLAUDE_ENV['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']).toBe('1');
+  });
+});
+
+describe('the child environment', () => {
+  it('forwards only the allowlist, never the whole of the browser environment', () => {
+    const env = claudeEnv({
+      HOME: '/home/tester',
+      PATH: '/usr/bin',
+      LANG: 'en_GB.UTF-8',
+      ANTHROPIC_API_KEY: 'sk-ant-should-not-travel',
+      AWS_SECRET_ACCESS_KEY: 'also-not',
+      HTTPS_PROXY: 'http://attacker.example',
+    });
+    expect(env).toEqual({
+      HOME: '/home/tester',
+      PATH: '/usr/bin',
+      LANG: 'en_GB.UTF-8',
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    });
+  });
+
+  it('leaves out an allowlisted name the parent never set, rather than passing undefined', () => {
+    expect(claudeEnv({ HOME: '/home/tester' })).not.toHaveProperty('TMPDIR');
+  });
+
+  it('keeps HOME, where the CLI looks for the login this whole product runs on', () => {
+    expect(INHERITED_ENV_VARS).toContain('HOME');
+    expect(INHERITED_ENV_VARS).toContain('PATH');
+    expect(INHERITED_ENV_VARS).not.toContain('ANTHROPIC_API_KEY');
   });
 });
 
@@ -396,7 +440,6 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
   });
   afterEach(() => {
     rmSync(scratch, { recursive: true, force: true });
-    delete process.env['FAKE_CLAUDE_PIDFILE'];
   });
 
   function runDeps(overrides: Partial<ClaudeRunDeps> = {}): ClaudeRunDeps {
@@ -459,16 +502,54 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
     for (const frame of frames) expect(frame).toHaveProperty('requestId', 'req-1');
   });
 
+  interface Echoed {
+    args: string[];
+    prompt: string;
+    env: Record<string, string>;
+    systemPrompt: string | null;
+    systemPromptMode: string | null;
+  }
+
+  const echo = async (system = 'RUNG 1 SYSTEM PROMPT'): Promise<Echoed> =>
+    JSON.parse(
+      textOf(await collect('scenario-echo', { prompt: 'FLATTENED TRANSCRIPT', system })),
+    ) as Echoed;
+
   it('actually passes the flags and the transcript to the process', async () => {
-    const frames = await collect('scenario-echo', {
-      prompt: 'FLATTENED TRANSCRIPT',
-      system: 'RUNG 1 SYSTEM PROMPT',
-    });
-    const echoed = JSON.parse(textOf(frames)) as { args: string[]; prompt: string };
+    const echoed = await echo();
     expect(echoed.prompt).toBe('FLATTENED TRANSCRIPT');
-    expect(echoed.args[echoed.args.indexOf('--system-prompt') + 1]).toBe('RUNG 1 SYSTEM PROMPT');
     expect(echoed.args[echoed.args.indexOf('--tools') + 1]).toBe('');
     expect(echoed.args).toContain('--include-partial-messages');
+  });
+
+  it('hands the system prompt over as a private file, not on argv', async () => {
+    const echoed = await echo('RUNG 1 SYSTEM PROMPT');
+    expect(echoed.args.join(' ')).not.toContain('RUNG 1 SYSTEM PROMPT');
+    expect(echoed.systemPrompt).toBe('RUNG 1 SYSTEM PROMPT');
+    // 0600: `ps` cannot show it and no other user can read it.
+    expect(echoed.systemPromptMode).toBe('600');
+  });
+
+  it('deletes the system prompt file once the run is over', async () => {
+    const echoed = await echo();
+    const path = echoed.args[echoed.args.indexOf('--system-prompt-file') + 1] as string;
+    expect(path).toMatch(/socrates-prompt-/);
+    expect(existsSync(path)).toBe(false);
+    expect(existsSync(dirname(path))).toBe(false);
+  });
+
+  it('runs the child in the allowlisted environment, not the browser’s', async () => {
+    const echoed = await echo();
+    expect(echoed.env['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC']).toBe('1');
+    expect(echoed.env['HOME']).toBe(process.env['HOME']);
+    // macOS puts `__CF_USER_TEXT_ENCODING` into every process it starts, whatever
+    // environment the parent asked for. That one is the platform's, not ours.
+    for (const name of Object.keys(echoed.env).filter((key) => !key.startsWith('__CF'))) {
+      expect(
+        [...INHERITED_ENV_VARS, ...Object.keys(CLAUDE_ENV)],
+        `${name} reached the claude child but is not on the allowlist`,
+      ).toContain(name);
+    }
   });
 
   it('maps a logged-out CLI onto the login remedy, and never prints the error as a reply', async () => {
@@ -539,8 +620,9 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
   });
 
   it('kills the child when the run is cancelled, and says nothing after', async () => {
-    const pidFile = join(scratch, 'child.pid');
-    process.env['FAKE_CLAUDE_PIDFILE'] = pidFile;
+    // The fixture writes its pid into the run's cwd; the child's environment is
+    // an allowlist now, so a path passed through it would not reach the fixture.
+    const pidFile = join(scratch, 'fake-claude.pid');
 
     const frames: HostResponse[] = [];
     let started: () => void = () => undefined;
