@@ -580,6 +580,11 @@ type ClearState = 'idle' | 'confirming' | 'clearing' | 'cleared';
  * now the only way to remove one was "Start fresh" on a resume offer, one
  * problem at a time, which is not an answer to "get this off my machine".
  *
+ * It clears the session in progress too, not only what is already on disk: the
+ * panel is holding a live transcript, and leaving it there would mean the next
+ * finished turn wrote it back. The caption says so, because losing the rung you
+ * are standing on is not what "clear saved data" sounds like on its own.
+ *
  * The click is deliberately two-step: the button says what it will do, and the
  * confirmation is a second, differently-labelled control. There is no undo.
  */
@@ -627,7 +632,7 @@ function SavedData({ onClear }: { onClear: () => Promise<void> }): ReactNode {
             <span className="small">
               {state === 'cleared'
                 ? 'Deleted. Your model choice is kept.'
-                : 'Transcripts and attempt history. No undo.'}
+                : 'Transcripts, attempt history, and the session you are in. No undo.'}
             </span>
           </>
         )}

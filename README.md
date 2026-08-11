@@ -168,6 +168,7 @@ Each change is a patch against the newest intent rather than a whole object buil
 **Test Claude Code access** reports the resolved `claude` binary and which account it is logged in as, learned from the host rather than hardcoded.
 
 **Clear all saved data** deletes every stored transcript and the whole session log, in one two-step click.
+It also ends the sitting in progress and drops the panel back to rung 0 - the panel is holding a live transcript, and leaving it there would mean the next finished turn wrote it straight back.
 Your model choice is a preference rather than data, and is kept.
 There is no undo.
 
@@ -261,7 +262,7 @@ The child gets an explicit environment allowlist rather than the browser's whole
 **What is stored, and where.**
 `chrome.storage.local`, unencrypted, on your machine only: one transcript per problem (statement, hints and your editor buffer) for up to 24 problems, a log of past attempts, and your model choice.
 Nothing is sent anywhere except to your own `claude` CLI when you ask for a hint; the extension makes no network requests of its own and asks for no host permission beyond leetcode.com.
-**Settings → Saved data → Clear all saved data** deletes every transcript and the whole attempt log in one step.
+**Settings → Saved data → Clear all saved data** deletes every transcript and the whole attempt log in one step, and resets the session in progress with them.
 
 ## Development
 
