@@ -32,11 +32,15 @@ describe('system prompt', () => {
 
   it.each(ALL_RUNGS)('marks rung %i as current and everything above it as locked', (rung) => {
     const prompt = buildSystemPrompt({ rung, language: 'javascript' });
-    expect(prompt).toContain(`Rung ${rung} - ${RUNGS[rung]!.name}: ${RUNGS[rung]!.summary} [UNLOCKED (current)]`);
+    expect(prompt).toContain(
+      `Rung ${rung} - ${RUNGS[rung]!.name}: ${RUNGS[rung]!.summary} [UNLOCKED (current)]`,
+    );
     for (const spec of RUNGS) {
       if (spec.id > rung) {
         expect(prompt).toContain(`Rung ${spec.id} - ${spec.name}: ${spec.summary} [LOCKED]`);
-        expect(prompt).toContain(`Rung ${spec.id} (${spec.name}) is LOCKED: do not ${spec.lockedPhrase}.`);
+        expect(prompt).toContain(
+          `Rung ${spec.id} (${spec.name}) is LOCKED: do not ${spec.lockedPhrase}.`,
+        );
       }
     }
   });
@@ -55,7 +59,7 @@ describe('system prompt', () => {
     expect(prompt).toContain('Naming by description still counts as naming');
   });
 
-  it('never lets a lower rung inherit a higher rung\'s permission', () => {
+  it("never lets a lower rung inherit a higher rung's permission", () => {
     // "name the technique" is rung 2's job; rung 0 and 1 must not grant it.
     const permission = RUNGS[2]!.reveals[0]!;
     expect(buildSystemPrompt({ rung: 0, language: 'js' })).not.toContain(permission);
@@ -69,7 +73,9 @@ describe('system prompt', () => {
   });
 
   it('names the language the user is writing in', () => {
-    expect(buildSystemPrompt({ rung: 3, language: 'typescript' })).toContain('They are writing typescript.');
+    expect(buildSystemPrompt({ rung: 3, language: 'typescript' })).toContain(
+      'They are writing typescript.',
+    );
   });
 
   it('offers a legal move instead of a leak when asked directly', () => {

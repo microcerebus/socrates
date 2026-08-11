@@ -99,7 +99,9 @@ export async function streamClaudeCode(options: ClaudeCodeStreamOptions): Promis
     port.onMessage.addListener((message: unknown) => {
       if (settled) return;
       if (!isHostResponse(message)) {
-        finish(() => reject(appError('claude-cli-failed', 'The native helper returned something unexpected.')));
+        finish(() =>
+          reject(appError('claude-cli-failed', 'The native helper returned something unexpected.')),
+        );
         return;
       }
       if (!message.ok) {

@@ -33,7 +33,10 @@ export type CaptureOutcome =
   /** A different problem. The panel has to follow the page. */
   | { kind: 'switched'; snapshot: PageSnapshot };
 
-export function classifyCapture(current: PageSnapshot | null, captured: PageSnapshot | null): CaptureOutcome {
+export function classifyCapture(
+  current: PageSnapshot | null,
+  captured: PageSnapshot | null,
+): CaptureOutcome {
   if (captured === null) return { kind: 'unchanged' };
 
   /*

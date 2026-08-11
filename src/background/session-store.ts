@@ -2,7 +2,13 @@
  * Per-problem session log and settings, in `chrome.storage.local`.
  */
 
-import { DEFAULT_SETTINGS, MODEL_IDS, type AttemptRecord, type ModelId, type Settings } from '../shared/types.ts';
+import {
+  DEFAULT_SETTINGS,
+  MODEL_IDS,
+  type AttemptRecord,
+  type ModelId,
+  type Settings,
+} from '../shared/types.ts';
 
 const ATTEMPTS_KEY = 'socrates:attempts';
 const SETTINGS_KEY = 'socrates:settings';

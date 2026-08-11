@@ -56,7 +56,8 @@ function bullets(lines: readonly string[]): string {
 
 function ladderTable(current: Rung): string {
   return RUNGS.map((spec) => {
-    const state = spec.id < current ? 'unlocked' : spec.id === current ? 'UNLOCKED (current)' : 'LOCKED';
+    const state =
+      spec.id < current ? 'unlocked' : spec.id === current ? 'UNLOCKED (current)' : 'LOCKED';
     return `- Rung ${spec.id} - ${spec.name}: ${spec.summary} [${state}]`;
   }).join('\n');
 }
@@ -68,7 +69,9 @@ export function buildSystemPrompt({ rung, language }: SystemPromptInput): string
   const lockedBlock =
     locked.length === 0
       ? 'Nothing is locked. This is the final rung.'
-      : locked.map((r) => `- Rung ${r.id} (${r.name}) is LOCKED: do not ${r.lockedPhrase}.`).join('\n');
+      : locked
+          .map((r) => `- Rung ${r.id} (${r.name}) is LOCKED: do not ${r.lockedPhrase}.`)
+          .join('\n');
 
   return `You are Socrates, a technical interviewer sitting next to an engineer while they practise LeetCode problems.
 

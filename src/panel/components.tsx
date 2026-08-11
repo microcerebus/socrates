@@ -52,7 +52,12 @@ export function RungMeter({ rung, started }: { rung: Rung; started: boolean }): 
       {RUNGS.map((spec) => {
         const state = rungStateFor(spec.id, rung, started);
         return (
-          <li key={spec.id} data-rung={spec.id} data-state={state} title={`Rung ${spec.id} · ${spec.name} - ${spec.summary}`}>
+          <li
+            key={spec.id}
+            data-rung={spec.id}
+            data-state={state}
+            title={`Rung ${spec.id} · ${spec.name} - ${spec.summary}`}
+          >
             <span className="sr-only">{`${spec.name} (${state})`}</span>
           </li>
         );
@@ -79,7 +84,12 @@ export function Header({
     <header className="header">
       <div className="header-row">
         <h1 title={problem?.title ?? ''}>{problem?.title ?? 'No problem loaded'}</h1>
-        <button type="button" className="icon-button" onClick={onOpenSettings} aria-label="Settings">
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onOpenSettings}
+          aria-label="Settings"
+        >
           ⚙
         </button>
       </div>
@@ -89,7 +99,11 @@ export function Header({
         with each other and with the ladder below without being read.
       */}
       <div className="meta">
-        {problem?.difficulty ? <span className={`pill diff-${problem.difficulty.toLowerCase()}`}>{problem.difficulty}</span> : null}
+        {problem?.difficulty ? (
+          <span className={`pill diff-${problem.difficulty.toLowerCase()}`}>
+            {problem.difficulty}
+          </span>
+        ) : null}
         <span className="mono">{formatDuration(elapsedMs)}</span>
         <span className="pill rung-pill" data-rung={rung}>
           Rung {spec.id} · {spec.name}
@@ -115,7 +129,13 @@ export function Header({
   );
 }
 
-export function ErrorNotice({ error, onDismiss }: { error: AppError; onDismiss: () => void }): ReactNode {
+export function ErrorNotice({
+  error,
+  onDismiss,
+}: {
+  error: AppError;
+  onDismiss: () => void;
+}): ReactNode {
   return (
     <div className="notice notice-error" role="alert">
       <p>{error.message}</p>
@@ -123,7 +143,11 @@ export function ErrorNotice({ error, onDismiss }: { error: AppError; onDismiss: 
         <div className="remedy" key={remedy.command}>
           <span>{remedy.label}</span>
           <code>{remedy.command}</code>
-          <button type="button" className="link" onClick={() => void navigator.clipboard.writeText(remedy.command)}>
+          <button
+            type="button"
+            className="link"
+            onClick={() => void navigator.clipboard.writeText(remedy.command)}
+          >
             copy
           </button>
         </div>
@@ -159,7 +183,13 @@ export function ThinkingIndicator({
   const liveness = livenessAt(progress, now);
   const seconds = elapsedSeconds(progress, now);
   return (
-    <div className="thinking" data-rung={rung} data-phase={progress.phase} data-liveness={liveness} role="status">
+    <div
+      className="thinking"
+      data-rung={rung}
+      data-phase={progress.phase}
+      data-liveness={liveness}
+      role="status"
+    >
       <span className="thinking-glyph" aria-hidden="true">
         ✳
       </span>
@@ -239,7 +269,11 @@ export function Transcript({
   onCancel: () => void;
 }): ReactNode {
   const busy = progress.phase !== 'idle';
-  const { scroller, pinned, onScroll, jumpToLatest } = useStickToBottom([turns.length, streaming, progress.phase]);
+  const { scroller, pinned, onScroll, jumpToLatest } = useStickToBottom([
+    turns.length,
+    streaming,
+    progress.phase,
+  ]);
 
   /*
    * A turn starts with `streaming` set to the empty string, so between the
@@ -255,8 +289,8 @@ export function Transcript({
         {turns.length === 0 && !busy ? (
           <div className="empty">
             <p>
-              Read the problem first. When you have a reading of it, start the interview - you will get one rung at a
-              time, and nothing above it.
+              Read the problem first. When you have a reading of it, start the interview - you will
+              get one rung at a time, and nothing above it.
             </p>
             <ol className="ladder-preview">
               {RUNGS.map((spec) => (
@@ -269,17 +303,25 @@ export function Transcript({
         ) : null}
 
         {turns.map((turn, index) => (
-          <article key={`${index}-${turn.role}`} className={`turn turn-${turn.role}`} data-rung={turn.rung}>
+          <article
+            key={`${index}-${turn.role}`}
+            className={`turn turn-${turn.role}`}
+            data-rung={turn.rung}
+          >
             {turn.role === 'assistant' ? (
               <div className="rung-tag">
                 rung {turn.rung} · {rungSpec(turn.rung).name}
               </div>
             ) : null}
-            <div className="body">{turn.role === 'assistant' ? <Markdown source={turn.text} /> : <p>{turn.text}</p>}</div>
+            <div className="body">
+              {turn.role === 'assistant' ? <Markdown source={turn.text} /> : <p>{turn.text}</p>}
+            </div>
           </article>
         ))}
 
-        {awaitingFirstToken ? <ThinkingIndicator progress={progress} now={now} rung={rung} onCancel={onCancel} /> : null}
+        {awaitingFirstToken ? (
+          <ThinkingIndicator progress={progress} now={now} rung={rung} onCancel={onCancel} />
+        ) : null}
         {streaming !== null && streaming !== '' ? (
           <article
             className={reducedMotion ? 'turn turn-assistant' : 'turn turn-assistant streaming'}
@@ -327,12 +369,13 @@ export function ResumeOffer({
     <section className="resume" data-rung={session.deepestRung}>
       <h2>You were here before</h2>
       <p className="small">
-        {exchanges} {exchanges === 1 ? 'reply' : 'replies'} · reached <strong>rung {session.deepestRung}</strong> (
-        {rungSpec(session.deepestRung).name}) · {hints} of {TOTAL_HINTS} hints · {formatDuration(session.elapsedMs)} spent
+        {exchanges} {exchanges === 1 ? 'reply' : 'replies'} · reached{' '}
+        <strong>rung {session.deepestRung}</strong> ({rungSpec(session.deepestRung).name}) · {hints}{' '}
+        of {TOTAL_HINTS} hints · {formatDuration(session.elapsedMs)} spent
       </p>
       <p className="small">
-        Resuming restores the conversation and the rung you had unlocked. Starting fresh means earning those hints again,
-        which costs another turn each.
+        Resuming restores the conversation and the rung you had unlocked. Starting fresh means
+        earning those hints again, which costs another turn each.
       </p>
       <div className="ladder-row">
         <button type="button" className="primary" onClick={onResume}>
@@ -390,7 +433,13 @@ export function Ladder({
         </button>
       </div>
       <div className="ladder-row">
-        <button type="button" className="ghost give-up" data-rung={5} disabled={busy || disabled || atTop} onClick={onGiveUp}>
+        <button
+          type="button"
+          className="ghost give-up"
+          data-rung={5}
+          disabled={busy || disabled || atTop}
+          onClick={onGiveUp}
+        >
           I give up - walk me through it
         </button>
       </div>
@@ -399,7 +448,11 @@ export function Ladder({
           'You are at the last rung.'
         ) : (
           <>
-            Next: <strong data-rung={nextRung} className="rung-name">{nextSpec?.name}</strong> - {nextSpec?.summary}
+            Next:{' '}
+            <strong data-rung={nextRung} className="rung-name">
+              {nextSpec?.name}
+            </strong>{' '}
+            - {nextSpec?.summary}
           </>
         )}
       </p>
@@ -481,12 +534,12 @@ function ClaudeCodeAccess({
     <>
       <h3>Claude Code access</h3>
       <p className="small">
-        Nothing to set up beyond a logged-in CLI. Socrates runs <code>claude</code> through a native helper, with
-        tools switched off and the interviewer prompt as the entire system prompt.
+        Nothing to set up beyond a logged-in CLI. Socrates runs <code>claude</code> through a native
+        helper, with tools switched off and the interviewer prompt as the entire system prompt.
       </p>
       <p className="small">
-        Hints draw on the same Max usage windows as every other Claude Code session on this machine - it is one
-        pool, and interview sessions are small but not free of it.
+        Hints draw on the same Max usage windows as every other Claude Code session on this machine
+        - it is one pool, and interview sessions are small but not free of it.
       </p>
       <p className="small">
         Binary:{' '}
@@ -561,7 +614,12 @@ export function SettingsPanel({
         </label>
       ))}
 
-      <ClaudeCodeAccess state={claudeState} access={claudeAccess} claudePath={hostInfo?.claudePath ?? null} onProbe={onProbeClaude} />
+      <ClaudeCodeAccess
+        state={claudeState}
+        access={claudeAccess}
+        claudePath={hostInfo?.claudePath ?? null}
+        onProbe={onProbeClaude}
+      />
     </section>
   );
 }
@@ -595,15 +653,28 @@ export function PasteForm({
       </p>
       <label className="field">
         <span>Title</span>
-        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="1. Two Sum" />
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="1. Two Sum"
+        />
       </label>
       <label className="field">
         <span>Problem statement, examples and constraints</span>
-        <textarea rows={8} value={statement} onChange={(event) => setStatement(event.target.value)} />
+        <textarea
+          rows={8}
+          value={statement}
+          onChange={(event) => setStatement(event.target.value)}
+        />
       </label>
       <label className="field">
         <span>Your code</span>
-        <textarea rows={8} value={code} onChange={(event) => setCode(event.target.value)} spellCheck={false} />
+        <textarea
+          rows={8}
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          spellCheck={false}
+        />
       </label>
       <label className="field">
         <span>Language</span>
@@ -617,7 +688,12 @@ export function PasteForm({
           onClick={() =>
             onSubmit({
               problem: {
-                slug: title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'pasted-problem',
+                slug:
+                  title
+                    .trim()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/^-|-$/g, '') || 'pasted-problem',
                 title: title.trim() || 'Pasted problem',
                 url: null,
                 difficulty: null,

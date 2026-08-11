@@ -27,8 +27,18 @@ import {
   parseAuthStatus,
   parseClaudeLine,
 } from '../src/native-host/claude.ts';
-import { CLAUDE_FALLBACK_PATHS, DEFAULT_CONFIG, parseConfig, resolveClaudePath } from '../src/native-host/config.ts';
-import { classifyClaudeFailure, handleRequest, type CommandResult, type HostDeps } from '../src/native-host/handler.ts';
+import {
+  CLAUDE_FALLBACK_PATHS,
+  DEFAULT_CONFIG,
+  parseConfig,
+  resolveClaudePath,
+} from '../src/native-host/config.ts';
+import {
+  classifyClaudeFailure,
+  handleRequest,
+  type CommandResult,
+  type HostDeps,
+} from '../src/native-host/handler.ts';
 import type { HostResponse } from '../src/native-host/protocol.ts';
 import { startClaudeRun, type ClaudeRunDeps } from '../src/native-host/runner.ts';
 
@@ -51,11 +61,15 @@ interface FakeDeps extends HostDeps {
   calls: string[][];
 }
 
-function hostDeps(options: { auth?: CommandResult; claudePath?: string; exists?: boolean } = {}): FakeDeps {
+function hostDeps(
+  options: { auth?: CommandResult; claudePath?: string; exists?: boolean } = {},
+): FakeDeps {
   const calls: string[][] = [];
   return {
     calls,
-    config: parseConfig(JSON.stringify({ ...DEFAULT_CONFIG, claudePath: options.claudePath ?? '/opt/bin/claude' })),
+    config: parseConfig(
+      JSON.stringify({ ...DEFAULT_CONFIG, claudePath: options.claudePath ?? '/opt/bin/claude' }),
+    ),
     home: FAKE_HOME,
     exists: () => options.exists ?? true,
     run: (command, args) => {
@@ -89,7 +103,7 @@ describe('the invocation', () => {
     expect(args).not.toContain('--dangerously-skip-permissions');
   });
 
-  it('keeps the machine\'s own Claude Code configuration out of an interview', () => {
+  it("keeps the machine's own Claude Code configuration out of an interview", () => {
     expect(args).toContain('--safe-mode');
     expect(args).toContain('--strict-mcp-config');
     expect(args).toContain('--disable-slash-commands');
@@ -105,7 +119,9 @@ describe('the invocation', () => {
 
   it('passes the settings model id straight through', () => {
     expect(flag('--model')).toBe('claude-sonnet-5');
-    expect(claudeArgs({ model: 'claude-haiku-4-5-20251001', system: '' })).toContain('claude-haiku-4-5-20251001');
+    expect(claudeArgs({ model: 'claude-haiku-4-5-20251001', system: '' })).toContain(
+      'claude-haiku-4-5-20251001',
+    );
   });
 
   it('suppresses the side calls a headless run does not need', () => {
@@ -134,7 +150,10 @@ describe('reading the CLI stream', () => {
     // Reading this one would print "Not logged in" into the panel as a reply.
     const line = JSON.stringify({
       type: 'assistant',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'Not logged in · Please run /login' }] },
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Not logged in · Please run /login' }],
+      },
       is_api_error_message: true,
     });
     expect(parseClaudeLine(line)).toBeNull();
@@ -150,14 +169,31 @@ describe('reading the CLI stream', () => {
 
   it('picks up the rate limit window and the terminal result', () => {
     expect(
-      parseClaudeLine(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 12 } })),
+      parseClaudeLine(
+        JSON.stringify({
+          type: 'rate_limit_event',
+          rate_limit_info: { status: 'allowed', resetsAt: 12 },
+        }),
+      ),
     ).toEqual({ kind: 'rate-limit', status: 'allowed', resetsAt: 12 });
 
     expect(
       parseClaudeLine(
-        JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'boom', api_error_status: 429 }),
+        JSON.stringify({
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          result: 'boom',
+          api_error_status: 429,
+        }),
       ),
-    ).toEqual({ kind: 'result', isError: true, message: 'boom', apiErrorStatus: 429, subtype: 'success' });
+    ).toEqual({
+      kind: 'result',
+      isError: true,
+      message: 'boom',
+      apiErrorStatus: 429,
+      subtype: 'success',
+    });
   });
 
   it('keeps the result subtype, which is what says whether `result` is assistant text', () => {
@@ -223,7 +259,11 @@ describe('finding the binary', () => {
 
   it('falls back to the well-known locations when the recorded one has moved', () => {
     const config = parseConfig(JSON.stringify({ claudePath: '/gone/claude' }));
-    const lookup = resolveClaudePath(config, (path) => path === `${FAKE_HOME}/.local/bin/claude`, FAKE_HOME);
+    const lookup = resolveClaudePath(
+      config,
+      (path) => path === `${FAKE_HOME}/.local/bin/claude`,
+      FAKE_HOME,
+    );
     expect(lookup.path).toBe(`${FAKE_HOME}/.local/bin/claude`);
   });
 
@@ -256,10 +296,19 @@ describe('explaining a failed run', () => {
   it('says to log in when the CLI says it is logged out', async () => {
     const deps = hostDeps({ auth: ok(LOGGED_OUT) });
     const response = await classifyClaudeFailure(
-      { message: 'Not logged in · Please run /login', apiErrorStatus: null, rateLimit: null, stderr: '' },
+      {
+        message: 'Not logged in · Please run /login',
+        apiErrorStatus: null,
+        rateLimit: null,
+        stderr: '',
+      },
       deps,
     );
-    expect(response).toMatchObject({ ok: false, code: 'claude-logged-out', command: CLAUDE_LOGIN_COMMAND });
+    expect(response).toMatchObject({
+      ok: false,
+      code: 'claude-logged-out',
+      command: CLAUDE_LOGIN_COMMAND,
+    });
     expect(deps.calls).toEqual([['/opt/bin/claude', 'auth', 'status', '--json']]);
   });
 
@@ -315,7 +364,9 @@ describe('the probe', () => {
   });
 
   it('reports a logged-out CLI with the login command', async () => {
-    await expect(handleRequest({ kind: 'claude-probe' }, hostDeps({ auth: ok(LOGGED_OUT) }))).resolves.toMatchObject({
+    await expect(
+      handleRequest({ kind: 'claude-probe' }, hostDeps({ auth: ok(LOGGED_OUT) })),
+    ).resolves.toMatchObject({
       ok: false,
       code: 'claude-logged-out',
       command: CLAUDE_LOGIN_COMMAND,
@@ -361,11 +412,19 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
   /** Drives one run to its terminal frame and hands back everything emitted. */
   function collect(
     scenario: string,
-    options: { prompt?: string; system?: string; deps?: ClaudeRunDeps; onFrame?(frame: HostResponse): void } = {},
+    options: {
+      prompt?: string;
+      system?: string;
+      deps?: ClaudeRunDeps;
+      onFrame?(frame: HostResponse): void;
+    } = {},
   ): Promise<HostResponse[]> {
     return new Promise((resolvePromise, rejectPromise) => {
       const frames: HostResponse[] = [];
-      const timer = setTimeout(() => rejectPromise(new Error(`${scenario} never finished`)), 20_000);
+      const timer = setTimeout(
+        () => rejectPromise(new Error(`${scenario} never finished`)),
+        20_000,
+      );
       startClaudeRun(
         {
           kind: 'claude-start',
@@ -414,7 +473,11 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
 
   it('maps a logged-out CLI onto the login remedy, and never prints the error as a reply', async () => {
     const frames = await collect('scenario-logged-out', {
-      deps: runDeps({ ...hostDeps({ claudePath: FAKE_CLAUDE, auth: ok(LOGGED_OUT) }), spawn, cwd: scratch }),
+      deps: runDeps({
+        ...hostDeps({ claudePath: FAKE_CLAUDE, auth: ok(LOGGED_OUT) }),
+        spawn,
+        cwd: scratch,
+      }),
     });
     expect(textOf(frames)).toBe('');
     expect(frames.at(-1)).toMatchObject({
@@ -425,7 +488,7 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
     });
   });
 
-  it('maps an exhausted usage window onto the CLI\'s own message', async () => {
+  it("maps an exhausted usage window onto the CLI's own message", async () => {
     const frames = await collect('scenario-usage-limit');
     const last = frames.at(-1);
     expect(last).toMatchObject({ ok: false, code: 'claude-usage-limit' });
@@ -465,7 +528,11 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
 
   it('reports a missing binary instead of spawning nothing and going quiet', async () => {
     const frames = await collect('scenario-reply', {
-      deps: runDeps({ ...hostDeps({ claudePath: '/gone/claude', exists: false }), spawn, cwd: scratch }),
+      deps: runDeps({
+        ...hostDeps({ claudePath: '/gone/claude', exists: false }),
+        spawn,
+        cwd: scratch,
+      }),
     });
     expect(frames).toHaveLength(1);
     expect(frames[0]).toMatchObject({ ok: false, code: 'claude-cli-missing', requestId: 'req-1' });
@@ -483,7 +550,13 @@ describe('streaming a turn against a fake claude binary', { timeout: 30_000 }, (
 
     // `scenario-hang` never exits on its own, so if the process is gone, we killed it.
     const cancel = startClaudeRun(
-      { kind: 'claude-start', requestId: 'req-hang', model: 'scenario-hang', system: 'system', prompt: 'prompt' },
+      {
+        kind: 'claude-start',
+        requestId: 'req-hang',
+        model: 'scenario-hang',
+        system: 'system',
+        prompt: 'prompt',
+      },
       runDeps(),
       (frame) => {
         frames.push(frame);

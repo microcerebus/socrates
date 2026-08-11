@@ -48,7 +48,10 @@ export function flattenMessages(messages: ApiMessage[]): string {
   if (earlier.length === 0) return current.content;
 
   const transcript = earlier
-    .map((message) => `## ${message.role === 'user' ? 'The candidate said' : 'You replied'}\n${message.content}`)
+    .map(
+      (message) =>
+        `## ${message.role === 'user' ? 'The candidate said' : 'You replied'}\n${message.content}`,
+    )
     .join('\n\n');
 
   return (

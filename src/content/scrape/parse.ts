@@ -115,29 +115,43 @@ export function splitSections(root: Element): Sections {
   };
 }
 
-export type ParseResult = { ok: true; problem: ProblemContext } | { ok: false; reason: ScrapeFailure; detail?: string };
+export type ParseResult =
+  { ok: true; problem: ProblemContext } | { ok: false; reason: ScrapeFailure; detail?: string };
 
 export function parseProblem(doc: Document, url: string): ParseResult {
   const root = queryFirst(doc, 'descriptionRoot');
   if (!root) {
-    return { ok: false, reason: 'no-problem-markup', detail: 'No description container matched any known selector.' };
+    return {
+      ok: false,
+      reason: 'no-problem-markup',
+      detail: 'No description container matched any known selector.',
+    };
   }
 
   const sections = splitSections(root);
   if (sections.statement === '') {
-    return { ok: false, reason: 'no-statement', detail: 'Found the description container but it was empty.' };
+    return {
+      ok: false,
+      reason: 'no-statement',
+      detail: 'Found the description container but it was empty.',
+    };
   }
 
   const titleElement = queryFirst(doc, 'title');
   const titleText = titleElement ? normaliseText(titleElement) : '';
   const href = titleElement?.getAttribute('href') ?? null;
-  const slug = slugFromUrl(url) ?? (href ? slugFromUrl(new URL(href, 'https://leetcode.com').toString()) : null);
+  const slug =
+    slugFromUrl(url) ??
+    (href ? slugFromUrl(new URL(href, 'https://leetcode.com').toString()) : null);
 
   return {
     ok: true,
     problem: {
       slug: slug ?? 'unknown-problem',
-      title: titleText !== '' ? titleText : (doc.title.replace(/\s*-\s*LeetCode\s*$/i, '').trim() || 'Untitled problem'),
+      title:
+        titleText !== ''
+          ? titleText
+          : doc.title.replace(/\s*-\s*LeetCode\s*$/i, '').trim() || 'Untitled problem',
       url,
       difficulty: difficultyFrom(doc),
       statement: sections.statement,

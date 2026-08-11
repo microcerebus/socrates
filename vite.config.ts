@@ -93,7 +93,11 @@ const configs: Record<Target, UserConfig> = {
     },
   },
 
-  'content-script': contentScript('src/content/content-script.ts', 'content-script.js', 'SocratesContent'),
+  'content-script': contentScript(
+    'src/content/content-script.ts',
+    'content-script.js',
+    'SocratesContent',
+  ),
   'page-bridge': contentScript('src/content/page-bridge.ts', 'page-bridge.js', 'SocratesBridge'),
 
   'native-host': {

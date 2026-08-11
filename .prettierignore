@@ -1,0 +1,7 @@
+dist/
+node_modules/
+coverage/
+pnpm-lock.yaml
+
+# Real LeetCode markup, captured byte-for-byte as scraper fixtures - not code style.
+tests/fixtures/*.html

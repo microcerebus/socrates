@@ -106,7 +106,9 @@ export function livenessAt(progress: TurnProgress, now: number): Liveness {
 export function progressLabel(progress: TurnProgress, liveness: Liveness): string {
   if (liveness === 'timed-out') return 'no response';
   if (liveness === 'stalled') {
-    return progress.phase === 'streaming' ? 'still working - the reply paused' : 'still working - long think';
+    return progress.phase === 'streaming'
+      ? 'still working - the reply paused'
+      : 'still working - long think';
   }
   switch (progress.phase) {
     case 'connecting':

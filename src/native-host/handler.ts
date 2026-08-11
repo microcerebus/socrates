@@ -94,7 +94,10 @@ export interface ClaudeRunOutcome {
  * CLI verbatim - an honest "this is what claude said" beats a confident guess
  * about someone's account.
  */
-export async function classifyClaudeFailure(outcome: ClaudeRunOutcome, deps: HostDeps): Promise<HostResponse> {
+export async function classifyClaudeFailure(
+  outcome: ClaudeRunOutcome,
+  deps: HostDeps,
+): Promise<HostResponse> {
   const lookup = findClaude(deps);
   if (outcome.spawnErrorCode === 'ENOENT' || lookup.path === null) return claudeMissing(lookup);
   if (outcome.spawnErrorCode) {
@@ -202,5 +205,9 @@ export async function handleRequest(request: HostRequest, deps: HostDeps): Promi
   if (request.kind === 'claude-probe') return claudeProbe(deps);
 
   // `claude-start` and `claude-cancel` are streaming, and are driven by main.ts.
-  return { ok: false, code: 'bad-request', message: `${request.kind} is not a request/response call.` };
+  return {
+    ok: false,
+    code: 'bad-request',
+    message: `${request.kind} is not a request/response call.`,
+  };
 }
