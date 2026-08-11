@@ -32,6 +32,8 @@ import {
   type Turn,
   type TurnRole,
 } from '../shared/types.ts';
+import { predatesClearAll } from './clear-boundary.ts';
+import { createWriteQueue } from './write-queue.ts';
 
 const SESSIONS_KEY = 'socrates:sessions';
 
@@ -119,35 +121,11 @@ export function normaliseSession(session: StoredSession): StoredSession {
 }
 
 /**
- * Every mutation runs one at a time, and reads its own copy of the record.
- *
- * The whole store is one `chrome.storage.local` key, so a write is inherently
- * read-modify-write over the *whole* record: get, change one slug, set it all
- * back. Two of those in flight at once both read the same "before" and the
- * second `set` silently discards the first slug's work - and the panel really
- * does overlap them, because a finished turn saves at the same moment a
- * `pagehide` does, and "start fresh" clears while a save may still be landing.
- *
- * The fix is the one `settings-writer.ts` already uses for the same class of
- * bug: one promise chain, in call order. The load-bearing detail is that
- * `readSessions()` is called *inside* the queued work rather than before it, so
- * each mutation merges into whatever the previous one actually wrote. Reads go
- * through the queue too, so a resume offer can never be built from a record that
- * a queued clear is about to invalidate.
- *
- * A rejected operation must not wedge the chain, hence the same handler on both
- * settle paths; each caller still sees its own rejection.
+ * Every mutation runs one at a time, and reads its own copy of the record - see
+ * `write-queue.ts` for why, and for the detail that `readSessions()` has to be
+ * called *inside* the queued work rather than before it.
  */
-let queue: Promise<unknown> = Promise.resolve();
-
-function enqueue<T>(work: () => Promise<T>): Promise<T> {
-  const run = queue.then(work, work);
-  queue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
-}
+const enqueue = createWriteQueue();
 
 async function readSessions(): Promise<SessionsBySlug> {
   const stored = await chrome.storage.local.get(SESSIONS_KEY);
@@ -177,7 +155,13 @@ export function getSession(slug: string): Promise<StoredSession | null> {
   });
 }
 
-export function saveSession(session: StoredSession): Promise<StoredSession> {
+/**
+ * Returns `null` when the write was refused because the session it describes was
+ * deleted by a clear-all - the panel's own `onDone` closure carries the
+ * `startedAt` the turn began with, so a turn finishing after the clear would
+ * otherwise write the deleted transcript straight back. See `clear-boundary.ts`.
+ */
+export function saveSession(session: StoredSession): Promise<StoredSession | null> {
   // Validating and clamping are pure, so they happen up front: a caller passing
   // nonsense should be rejected without taking a turn in the queue.
   const coerced = coerceSession(session);
@@ -187,6 +171,9 @@ export function saveSession(session: StoredSession): Promise<StoredSession> {
   const normalised = normaliseSession(coerced);
 
   return enqueue(async () => {
+    // Judged here rather than at the call, because a clear can be marked while
+    // this write waits its turn in the queue.
+    if (predatesClearAll(normalised.startedAt)) return null;
     const all = await readSessions();
     all[normalised.slug] = normalised;
     await chrome.storage.local.set({ [SESSIONS_KEY]: pruneSessions(all) });

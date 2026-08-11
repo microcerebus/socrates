@@ -14,6 +14,7 @@ import {
   type WorkerFrameBody,
 } from '../shared/protocol.ts';
 import { appError, type AppError, type PageSnapshot } from '../shared/types.ts';
+import { markClearAll } from './clear-boundary.ts';
 import { runInterviewTurn } from './interview.ts';
 import { getHostInfo, probeClaudeAccess } from './native-host-client.ts';
 import { claudeCodeProvider } from './providers.ts';
@@ -193,6 +194,10 @@ chrome.runtime.onConnect.addListener((port) => {
         break;
 
       case 'clear-all-data':
+        // Marked synchronously, before either store is touched: a write landing
+        // while the clear runs has to be judged against the new boundary, not
+        // the old one.
+        markClearAll(message.activeFrom);
         void Promise.all([clearAllSessions(), clearAllAttempts()])
           .then(() => send({ kind: 'cleared' }))
           .catch(fail);

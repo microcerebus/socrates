@@ -620,9 +620,9 @@ export function App(): ReactNode {
    * write synchronously, in this same tick, and keeps refusing until a new turn
    * begins for the slug.
    */
-  const resetSession = (slug: string): void => {
+  const resetSession = (slug: string, at: number = Date.now()): void => {
     sessionWriter.discard(slug);
-    const startedAt = Date.now();
+    const startedAt = at;
     setTurns([]);
     setRung(0);
     setDeepestRung(0);
@@ -657,10 +657,15 @@ export function App(): ReactNode {
    * progress; the button says so and says there is no undo.
    */
   const onClearAllData = (): Promise<void> => {
+    // One instant, used twice: the session the panel starts now and the boundary
+    // the worker refuses older writes against have to be the *same* identity, or
+    // the replacement session is refused along with the deleted one.
+    const startedAt = Date.now();
+    const activeFrom = nowIso(startedAt);
     const slug = snapshot?.problem.slug ?? null;
-    if (slug !== null) resetSession(slug);
+    if (slug !== null) resetSession(slug, startedAt);
     setAllAttempts([]);
-    return client.clearAllData().catch((failure: AppError) => {
+    return client.clearAllData(activeFrom).catch((failure: AppError) => {
       setError(failure);
       throw failure;
     });
