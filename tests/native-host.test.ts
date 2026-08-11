@@ -8,17 +8,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_CONFIG, parseConfig } from '../src/native-host/config.ts';
+import { CLAUDE_FALLBACK_PATHS, DEFAULT_CONFIG, parseConfig } from '../src/native-host/config.ts';
 import { handleRequest, type HostDeps } from '../src/native-host/handler.ts';
 import { MessageDecoder, encodeMessage, isHostRequest } from '../src/native-host/protocol.ts';
 
 const FAKE_HOME = '/home/tester';
 
-function deps(config = DEFAULT_CONFIG): HostDeps {
+function deps(config = DEFAULT_CONFIG, exists: (path: string) => boolean = () => true): HostDeps {
   return {
     config,
     home: FAKE_HOME,
-    exists: () => true,
+    exists,
     run: () => Promise.resolve({ exitCode: 0, stdout: '', stderr: '' }),
   };
 }
@@ -90,6 +90,25 @@ describe('request dispatch', () => {
     await expect(handleRequest({ kind: 'claude-cancel', requestId: 'r1' }, deps())).resolves.toMatchObject({
       ok: false,
       code: 'bad-request',
+    });
+  });
+
+  /*
+   * The recorded `claudePath` is only a hint, not a promise: `claude install`
+   * and Homebrew both relocate the binary, and a rerun of the installer is the
+   * normal way that gets picked up. Between an install and a rerun the config
+   * can point at a binary that is no longer there, and the host must still work
+   * off whichever well-known location does resolve rather than failing outright.
+   */
+  it('answers ping with a fallback path when the recorded claudePath is dead', async () => {
+    const config = parseConfig(JSON.stringify({ claudePath: '/gone/claude' }));
+    const fallback = `${FAKE_HOME}/${CLAUDE_FALLBACK_PATHS[0]}`;
+    const exists = (path: string): boolean => path === fallback;
+
+    await expect(handleRequest({ kind: 'ping' }, deps(config, exists))).resolves.toEqual({
+      ok: true,
+      kind: 'pong',
+      claudePath: fallback,
     });
   });
 });

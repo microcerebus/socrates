@@ -134,18 +134,30 @@ done
 [ "$INSTALLED" -eq 1 ] || die "no Chrome or Brave profile directory found - is one installed for this user?"
 
 # --- non-secret host config --------------------------------------------------
+#
+# claudePath is always refreshed to the binary this run just resolved, even on
+# a rerun: `claude install` and Homebrew both relocate the binary, and a rerun
+# whose whole point is picking up that move must not leave the stale path
+# behind. Any other field a user has hand-added to the config is preserved -
+# only claudePath is ours to overwrite.
 
 mkdir -p "$CONFIG_DIR"
-if [ -f "$CONFIG_FILE" ] && [ "${SOCRATES_FORCE_CONFIG:-0}" != "1" ]; then
-  printf 'keeping    %s (set SOCRATES_FORCE_CONFIG=1 to overwrite)\n' "$CONFIG_FILE"
-else
-  cat > "$CONFIG_FILE" <<EOF
-{
-  "claudePath": "$CLAUDE_BIN"
+"$NODE_BIN" - "$CONFIG_FILE" "$CLAUDE_BIN" <<'NODE'
+const { readFileSync, writeFileSync } = require('node:fs');
+const [file, claudePath] = process.argv.slice(2);
+
+let config = {};
+try {
+  const previous = JSON.parse(readFileSync(file, 'utf8'));
+  if (typeof previous === 'object' && previous !== null) config = previous;
+} catch {
+  /* no config yet, or an unreadable one we are about to replace */
 }
-EOF
-  printf 'wrote      %s\n' "$CONFIG_FILE"
-fi
+
+config.claudePath = claudePath;
+writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+NODE
+printf 'wrote      %s (claudePath: %s)\n' "$CONFIG_FILE" "$CLAUDE_BIN"
 
 cat <<EOF
 
