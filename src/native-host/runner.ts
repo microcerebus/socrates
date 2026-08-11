@@ -21,7 +21,7 @@ import {
 import { classifyClaudeFailure, claudeMissing, findClaude, type HostDeps } from './handler.ts';
 import type { HostRequest, HostResponse } from './protocol.ts';
 
-/** A model turn is not a `dcli read`; Opus at rung 5 can legitimately take minutes. */
+/** A model turn is not a quick lookup; Opus at rung 5 can legitimately take minutes. */
 export const CLAUDE_TIMEOUT_MS = 5 * 60_000;
 /** How long a cancelled child gets to exit on its own before SIGKILL. */
 export const KILL_GRACE_MS = 2_000;

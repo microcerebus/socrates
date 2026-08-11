@@ -11,10 +11,8 @@ import type {
   AskIntent,
   AttemptRecord,
   EditorContext,
-  ModelId,
   PageSnapshot,
   ProblemContext,
-  ProviderId,
   Rung,
   Settings,
   StoredSession,
@@ -48,7 +46,6 @@ export type PanelRequest =
   | { id: number; kind: 'get-session'; slug: string }
   | { id: number; kind: 'save-session'; session: StoredSession }
   | { id: number; kind: 'clear-session'; slug: string }
-  | { id: number; kind: 'probe-key' }
   | { id: number; kind: 'probe-claude' }
   | { id: number; kind: 'host-info' };
 
@@ -64,9 +61,8 @@ export type WorkerFrame =
   | { id: number; kind: 'attempts'; attempts: AttemptRecord[] }
   /** `null` when there is nothing stored for that slug. */
   | { id: number; kind: 'session'; session: StoredSession | null }
-  | { id: number; kind: 'key-ok' }
   | { id: number; kind: 'claude-ok'; claudePath: string; account: string | null; subscription: string | null }
-  | { id: number; kind: 'host-info'; itemTitle: string; claudePath: string | null }
+  | { id: number; kind: 'host-info'; claudePath: string | null }
   | { id: number; kind: 'ack' }
   | { id: number; kind: 'error'; error: AppError };
 
@@ -99,9 +95,4 @@ export interface PageBridgeResponse {
   language?: string;
   code?: string;
   detail?: string;
-}
-
-export interface StoredSettings {
-  provider: ProviderId;
-  model: ModelId;
 }

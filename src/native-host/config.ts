@@ -3,34 +3,22 @@
  *
  * Lives at `~/.config/socrates/native-host.json` and is written by
  * `bin/install-native-host.sh`. It contains *no* secrets - only where to find
- * the two binaries the host shells out to, and which Dashlane item holds the
- * API key.
+ * the `claude` binary the host shells out to.
  */
 
 export interface HostConfig {
   /**
-   * Absolute path to the Dashlane CLI. Chrome launches native hosts with a
-   * minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin` on macOS), so a Homebrew
-   * `dcli` is not on it - the installer resolves and records the real path.
-   */
-  dcliPath: string;
-  /** Title of the Dashlane item that holds the key. */
-  itemTitle: string;
-  /** Field on that item: `content` for a secure note, `password` for a credential. */
-  itemField: string;
-  /**
-   * Absolute path to the Claude Code CLI, recorded by the installer for the same
-   * reason as `dcliPath`. It can go stale - `claude install` and Homebrew both
-   * move the binary - so the host also probes the well-known locations below
-   * before giving up, and says which ones it tried.
+   * Absolute path to the Claude Code CLI, recorded by the installer because
+   * Chrome launches native hosts with a minimal PATH
+   * (`/usr/bin:/bin:/usr/sbin:/sbin` on macOS), so a Homebrew or `claude
+   * install` binary is not on it. It can also go stale - `claude install` and
+   * Homebrew both move the binary - so the host also probes the well-known
+   * locations below before giving up, and says which ones it tried.
    */
   claudePath: string;
 }
 
 export const DEFAULT_CONFIG: HostConfig = {
-  dcliPath: '/opt/homebrew/bin/dcli',
-  itemTitle: 'Anthropic API Key',
-  itemField: 'content',
   claudePath: '/opt/homebrew/bin/claude',
 };
 
@@ -57,16 +45,8 @@ export function parseConfig(raw: string | null): HostConfig {
   if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_CONFIG };
   const record = parsed as Record<string, unknown>;
   return {
-    dcliPath: readString(record, 'dcliPath', DEFAULT_CONFIG.dcliPath),
-    itemTitle: readString(record, 'itemTitle', DEFAULT_CONFIG.itemTitle),
-    itemField: readString(record, 'itemField', DEFAULT_CONFIG.itemField),
     claudePath: readString(record, 'claudePath', DEFAULT_CONFIG.claudePath),
   };
-}
-
-/** `dl://<title>/<field>` - the path form `dcli read` expects. */
-export function vaultPath(config: HostConfig): string {
-  return `dl://${config.itemTitle}/${config.itemField}`;
 }
 
 export interface ClaudePathLookup {

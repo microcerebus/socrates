@@ -7,12 +7,10 @@
 # The manifest pins a public key, so the extension id is stable no matter where
 # dist/ lives. Both known ids are registered by default, and re-running merges
 # rather than clobbers: any id already present in an installed manifest is kept.
-# Re-run after installing dcli or claude somewhere new.
+# Re-run after installing or moving the claude CLI.
 #
 # Nothing secret is written. The host manifest points Chrome at a launcher; the
-# launcher runs a Node script that either shells out to `dcli` for the API key or
-# streams a reply from the `claude` CLI, depending on the provider chosen in the
-# panel's settings.
+# launcher runs a Node script that streams a reply from the `claude` CLI.
 
 set -euo pipefail
 
@@ -50,6 +48,11 @@ done
 
 NODE_BIN="$(command -v node || true)"
 [ -n "$NODE_BIN" ] || die "node is not on PATH"
+
+CLAUDE_BIN="$(command -v claude || true)"
+if [ -z "$CLAUDE_BIN" ]; then
+  die "claude is not on PATH. Install Claude Code from https://claude.com/claude-code and log in, then re-run this script."
+fi
 
 # Chrome launches native hosts with a minimal PATH, so the launcher hard-codes
 # the absolute path to node instead of relying on a shebang lookup.
@@ -106,7 +109,7 @@ writeFileSync(
   `${JSON.stringify(
     {
       name: hostName,
-      description: 'Reads the Anthropic API key for Socrates out of Dashlane, and runs the Claude Code CLI for it.',
+      description: 'Runs the Claude Code CLI for Socrates, headlessly.',
       path: launcher,
       type: 'stdio',
       allowed_origins,
@@ -131,35 +134,30 @@ done
 [ "$INSTALLED" -eq 1 ] || die "no Chrome or Brave profile directory found - is one installed for this user?"
 
 # --- non-secret host config --------------------------------------------------
-
-DCLI_BIN="$(command -v dcli || true)"
-CLAUDE_BIN="$(command -v claude || true)"
-ITEM_TITLE="${SOCRATES_ITEM_TITLE:-Anthropic API Key}"
-ITEM_FIELD="${SOCRATES_ITEM_FIELD:-content}"
+#
+# claudePath is always refreshed to the binary this run just resolved, even on
+# a rerun: `claude install` and Homebrew both relocate the binary, and a rerun
+# whose whole point is picking up that move must not leave the stale path
+# behind. Any other field a user has hand-added to the config is preserved -
+# only claudePath is ours to overwrite.
 
 mkdir -p "$CONFIG_DIR"
-if [ -f "$CONFIG_FILE" ] && [ "${SOCRATES_FORCE_CONFIG:-0}" != "1" ]; then
-  printf 'keeping    %s (set SOCRATES_FORCE_CONFIG=1 to overwrite)\n' "$CONFIG_FILE"
-else
-  cat > "$CONFIG_FILE" <<EOF
-{
-  "dcliPath": "${DCLI_BIN:-/opt/homebrew/bin/dcli}",
-  "itemTitle": "$ITEM_TITLE",
-  "itemField": "$ITEM_FIELD",
-  "claudePath": "${CLAUDE_BIN:-$HOME/.local/bin/claude}"
-}
-EOF
-  printf 'wrote      %s\n' "$CONFIG_FILE"
-fi
+"$NODE_BIN" - "$CONFIG_FILE" "$CLAUDE_BIN" <<'NODE'
+const { readFileSync, writeFileSync } = require('node:fs');
+const [file, claudePath] = process.argv.slice(2);
 
-if [ -z "$CLAUDE_BIN" ]; then
-  printf '\nwarning: claude is not on PATH, so the default Claude Code provider has nothing to run.\n'
-  printf 'Install it from https://claude.com/claude-code, then re-run this script.\n'
-fi
-if [ -z "$DCLI_BIN" ]; then
-  printf '\nnote: dcli is not on PATH. It is only needed for the "Anthropic API key" provider:\n'
-  printf '  brew install dashlane/tap/dashlane-cli\n'
-fi
+let config = {};
+try {
+  const previous = JSON.parse(readFileSync(file, 'utf8'));
+  if (typeof previous === 'object' && previous !== null) config = previous;
+} catch {
+  /* no config yet, or an unreadable one we are about to replace */
+}
+
+config.claudePath = claudePath;
+writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+NODE
+printf 'wrote      %s (claudePath: %s)\n' "$CONFIG_FILE" "$CLAUDE_BIN"
 
 cat <<EOF
 
@@ -168,10 +166,6 @@ Done. Next:
      but reloading clears any cached failure).
   2. Open a LeetCode problem and click the Socrates icon.
 
-The default provider is Claude Code, which needs nothing but a logged-in CLI:
-  ${CLAUDE_BIN:-claude} auth status
-
-To use the Anthropic API key instead, switch provider in the panel's settings and make sure your
-vault has an item titled "$ITEM_TITLE" whose $ITEM_FIELD is the key:
-  dcli read "dl://$ITEM_TITLE/$ITEM_FIELD"
+Hints run on your own Claude Code login:
+  $CLAUDE_BIN auth status
 EOF

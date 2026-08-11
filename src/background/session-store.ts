@@ -1,19 +1,8 @@
 /**
  * Per-problem session log and settings, in `chrome.storage.local`.
- *
- * Only non-secret data lives here. The API key is deliberately absent - see
- * `keychain.ts`.
  */
 
-import {
-  DEFAULT_SETTINGS,
-  MODEL_IDS,
-  PROVIDER_IDS,
-  type AttemptRecord,
-  type ModelId,
-  type ProviderId,
-  type Settings,
-} from '../shared/types.ts';
+import { DEFAULT_SETTINGS, MODEL_IDS, type AttemptRecord, type ModelId, type Settings } from '../shared/types.ts';
 
 const ATTEMPTS_KEY = 'socrates:attempts';
 const SETTINGS_KEY = 'socrates:settings';
@@ -54,22 +43,10 @@ function isModelId(value: unknown): value is ModelId {
   return typeof value === 'string' && (MODEL_IDS as readonly string[]).includes(value);
 }
 
-function isProviderId(value: unknown): value is ProviderId {
-  return typeof value === 'string' && (PROVIDER_IDS as readonly string[]).includes(value);
-}
-
-/**
- * Each field falls back on its own. A settings blob written before the provider
- * existed keeps its model and picks up the default provider, rather than being
- * thrown away wholesale.
- */
 function coerceSettings(value: unknown): Settings {
   if (typeof value !== 'object' || value === null) return { ...DEFAULT_SETTINGS };
-  const record = value as { model?: unknown; provider?: unknown };
-  return {
-    provider: isProviderId(record.provider) ? record.provider : DEFAULT_SETTINGS.provider,
-    model: isModelId(record.model) ? record.model : DEFAULT_SETTINGS.model,
-  };
+  const record = value as { model?: unknown };
+  return { model: isModelId(record.model) ? record.model : DEFAULT_SETTINGS.model };
 }
 
 export async function getSettings(): Promise<Settings> {

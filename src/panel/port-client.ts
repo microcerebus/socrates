@@ -24,7 +24,6 @@ type FrameHandler = (frame: WorkerFrame) => void;
 
 /** What the native host is configured with. Non-secret; shown in Settings. */
 export interface HostInfo {
-  itemTitle: string;
   claudePath: string | null;
 }
 
@@ -143,15 +142,7 @@ export class PortClient {
   hostInfo(): Promise<HostInfo> {
     return this.#once(
       (id) => ({ id, kind: 'host-info' }),
-      (frame) =>
-        frame.kind === 'host-info' ? { itemTitle: frame.itemTitle, claudePath: frame.claudePath } : undefined,
-    );
-  }
-
-  probeKey(): Promise<true> {
-    return this.#once(
-      (id) => ({ id, kind: 'probe-key' }),
-      (frame) => (frame.kind === 'key-ok' ? true : undefined),
+      (frame) => (frame.kind === 'host-info' ? { claudePath: frame.claudePath } : undefined),
     );
   }
 

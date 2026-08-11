@@ -7,19 +7,21 @@
  *     context (problem, editor buffer, hint state) rides along;
  *  2. the response we surface - that a model reply containing code below rung 4
  *     never reaches the panel, even when it arrives split across stream chunks.
+ *
+ * The end-to-end version of (2), run against the actual streaming transport, is
+ * in `tests/claude-code.test.ts` instead - this file covers the pieces that do
+ * not depend on any transport.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { buildRequestBody } from '../src/background/anthropic.ts';
-import { runInterviewTurn, toApiMessages } from '../src/background/interview.ts';
-import { apiKeyProvider } from '../src/background/providers.ts';
+import { toApiMessages } from '../src/background/interview.ts';
 import { buildUserTurn } from '../src/prompt/context.ts';
 import { RUNGS, TECHNIQUE_NAMES, TOTAL_HINTS } from '../src/prompt/rungs.ts';
 import { WITHHELD_NOTICE, redactCode } from '../src/prompt/spoiler-guard.ts';
 import { SYSTEM_PROMPT_VERSION, buildSystemPrompt } from '../src/prompt/system-prompt.ts';
-import type { AppError, ModelId, Rung } from '../src/shared/types.ts';
-import { SNAPSHOT, askRequest, mockAnthropic, sseBody } from './helpers.ts';
+import type { Rung } from '../src/shared/types.ts';
+import { SNAPSHOT, askRequest } from './helpers.ts';
 
 const ALL_RUNGS: Rung[] = [0, 1, 2, 3, 4, 5];
 
@@ -128,122 +130,6 @@ describe('context turn', () => {
     expect(messages[0]?.role).toBe('user');
     expect(messages.at(-1)?.role).toBe('user');
     expect(messages.at(-1)?.content).toContain('# SESSION');
-  });
-});
-
-describe('request body', () => {
-  it('uses adaptive thinking and effort on the Claude 5 models', () => {
-    for (const model of ['claude-sonnet-5', 'claude-opus-5'] satisfies ModelId[]) {
-      const body = buildRequestBody(model, 'system', [{ role: 'user', content: 'hi' }]);
-      expect(body.thinking).toEqual({ type: 'adaptive' });
-      expect(body.output_config).toEqual({ effort: 'medium' });
-      expect(body.stream).toBe(true);
-    }
-  });
-
-  it('omits both on Haiku 4.5, which rejects them', () => {
-    const body = buildRequestBody('claude-haiku-4-5-20251001', 'system', [{ role: 'user', content: 'hi' }]);
-    expect(body.thinking).toBeUndefined();
-    expect(body.output_config).toBeUndefined();
-  });
-});
-
-describe('an interview turn end to end', () => {
-  const apiKey = 'sk-test';
-  const codeReply = [
-    'Track what you have seen.\n\n',
-    '```javascript\nconst seen = new Map();\n',
-    'for (const n of nums) seen.set(n, 1);\n```\n\n',
-    'That is the shape of it.',
-  ];
-
-  it('sends the gated system prompt and the direct-browser-access header', async () => {
-    const mock = mockAnthropic(sseBody(['ok']));
-    await runInterviewTurn({
-      model: 'claude-sonnet-5',
-      request: askRequest({ rung: 1 }),
-      onText: () => undefined,
-      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
-    });
-
-    const call = mock.calls[0]!;
-    expect(call.url).toBe('https://api.anthropic.com/v1/messages');
-    expect(call.headers['anthropic-dangerous-direct-browser-access']).toBe('true');
-    expect(call.headers['x-api-key']).toBe('sk-test');
-    expect(call.headers['anthropic-version']).toBe('2023-06-01');
-
-    const system = (call.body['system'] as { text: string }[])[0]!.text;
-    expect(system).toContain('You are at rung 1 - Pattern smell');
-    expect(system).toContain('Rung 2 (Name the technique) is LOCKED');
-  });
-
-  it.each([0, 1, 2, 3] satisfies Rung[])('strips fenced code from a rung %i reply', async (rung) => {
-    const mock = mockAnthropic(sseBody(codeReply));
-    let output = '';
-    await runInterviewTurn({
-      model: 'claude-sonnet-5',
-      request: askRequest({ rung }),
-      onText: (text) => {
-        output += text;
-      },
-      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
-    });
-
-    expect(output).not.toContain('new Map()');
-    expect(output).not.toContain('```');
-    expect(output).toContain(WITHHELD_NOTICE.trim());
-    expect(output).toContain('Track what you have seen.');
-    expect(output).toContain('That is the shape of it.');
-  });
-
-  it.each([4, 5] satisfies Rung[])('lets code through at rung %i', async (rung) => {
-    const mock = mockAnthropic(sseBody(codeReply));
-    let output = '';
-    await runInterviewTurn({
-      model: 'claude-opus-5',
-      request: askRequest({ rung }),
-      onText: (text) => {
-        output += text;
-      },
-      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
-    });
-
-    expect(output).toContain('const seen = new Map();');
-    expect(output).toContain('```javascript');
-  });
-
-  it('reports a thinking block before any text arrives', async () => {
-    const mock = mockAnthropic(sseBody(['hello'], { withThinking: true }));
-    const seen: string[] = [];
-    await runInterviewTurn({
-      model: 'claude-sonnet-5',
-      request: askRequest(),
-      onThinking: () => seen.push('thinking'),
-      onText: () => seen.push('text'),
-      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
-    });
-    expect(seen[0]).toBe('thinking');
-  });
-
-  it('surfaces an auth failure with something to do about it, and no hardcoded vault path', async () => {
-    const mock = mockAnthropic(JSON.stringify({ error: { message: 'invalid x-api-key' } }), { status: 401 });
-    const failure = await runInterviewTurn({
-      model: 'claude-sonnet-5',
-      request: askRequest(),
-      onText: () => undefined,
-      stream: apiKeyProvider({ apiKey, fetchImpl: mock.impl }),
-    }).then(
-      () => null,
-      (error: AppError) => error,
-    );
-
-    expect(failure).toMatchObject({ code: 'api-auth', remedies: [{ command: 'dcli sync' }] });
-    // The Dashlane item is configurable in the native host config, so nothing in
-    // the extension may name one.
-    const surface = JSON.stringify(failure);
-    expect(surface).not.toContain('dl://');
-    expect(surface).not.toContain('Anthropic API Key');
-    expect(failure?.message).toContain('Settings');
   });
 });
 

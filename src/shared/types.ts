@@ -29,51 +29,11 @@ export const MODEL_CHOICES: readonly ModelChoice[] = [
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', blurb: 'Fastest, cheapest.' },
 ];
 
-/**
- * Where a reply comes from.
- *
- * `claude-code` drives the local `claude` CLI through the native host, so it
- * runs on the Claude subscription you are already logged into and needs no API
- * credits. `api-key` posts to api.anthropic.com with a key read from Dashlane.
- * The rung discipline, the prompt and the spoiler guard are identical either
- * way - only the transport differs.
- */
-export const PROVIDER_IDS = ['claude-code', 'api-key'] as const;
-export type ProviderId = (typeof PROVIDER_IDS)[number];
-
-export const DEFAULT_PROVIDER: ProviderId = 'claude-code';
-
-export interface ProviderChoice {
-  id: ProviderId;
-  label: string;
-  blurb: string;
-  /** The honest cost of choosing this one. Shown under the choice, always. */
-  caveat: string;
-}
-
-export const PROVIDER_CHOICES: readonly ProviderChoice[] = [
-  {
-    id: 'claude-code',
-    label: 'Claude Code (Max plan)',
-    blurb: 'Runs the claude CLI you are already logged into. No API credits, no key, no setup.',
-    caveat:
-      'Hints draw on the same Max usage windows as every other Claude Code session on this machine. ' +
-      'It is one pool - interview sessions are small, but they are not free of it.',
-  },
-  {
-    id: 'api-key',
-    label: 'Anthropic API key (Dashlane)',
-    blurb: 'Calls api.anthropic.com directly with a key read from your vault at session start.',
-    caveat: 'Bills prepaid API credits on your Anthropic console account, separately from any subscription.',
-  },
-];
-
 export interface Settings {
-  provider: ProviderId;
   model: ModelId;
 }
 
-export const DEFAULT_SETTINGS: Settings = { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL };
+export const DEFAULT_SETTINGS: Settings = { model: DEFAULT_MODEL };
 
 /** Where a piece of context came from. Surfaced in the UI so the user knows what the model sees. */
 export type ContextSource = 'leetcode' | 'manual';
@@ -170,18 +130,11 @@ export type AskIntent = 'unlock' | 'chat' | 'review' | 'giveup';
 
 export type ErrorCode =
   | 'native-host-missing'
-  | 'dcli-missing'
-  | 'vault-locked'
-  | 'vault-item-missing'
-  | 'key-fetch-failed'
-  | 'api-auth'
-  | 'api-rate-limit'
   | 'api-error'
   | 'claude-cli-missing'
   | 'claude-logged-out'
   | 'claude-usage-limit'
   | 'claude-cli-failed'
-  | 'network'
   | 'aborted'
   | 'no-context';
 

@@ -1,13 +1,12 @@
 /**
  * Race-safe settings changes.
  *
- * The panel writes settings from two independent radio groups, and a user
- * switching provider and then model does it faster than a round trip to the
- * worker. Building each write from React's render-scoped `settings` loses that
- * race twice over: the second handler reads the state as it was when the render
- * happened - before the first change - so it sends a full object that undoes it,
- * and two replies can land in either order and overwrite each other on the way
- * back.
+ * The panel writes settings from a radio group, and a user clicking through
+ * models faster than a round trip to the worker can still race: two replies can
+ * land in either order and overwrite each other on the way back. Building each
+ * write from React's render-scoped `settings` loses that race too - the second
+ * handler reads the state as it was when the render happened, before the first
+ * change, so it sends a full object that undoes it.
  *
  * So the intent lives here rather than in a render closure, and three things
  * keep it straight:

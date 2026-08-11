@@ -70,7 +70,7 @@
  *
  * ## Run first, classify later
  *
- * Same rule as the `dcli` path in `handler.ts`. The happy path reads nothing but
+ * The happy path reads nothing but
  * the CLI's own JSON frames. `claude auth status --json` is consulted only after
  * a run has already failed, and only its documented JSON fields are read - when
  * a failure is not one we can name, the host quotes the CLI's own words instead

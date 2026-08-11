@@ -1,16 +1,20 @@
 /**
- * The two ways a reply can be produced, behind one function type.
+ * Streams a reply from the local `claude` CLI through the native host, on
+ * whatever subscription that CLI is logged into.
  *
  * `interview.ts` owns everything that makes a reply correct - the gated system
- * prompt, the message list, the spoiler guard - and knows nothing about where
- * the tokens come from. A provider is only a transport: same system prompt, same
- * messages, same `onText` contract. That is what makes the guard and the rung
- * discipline provider-independent rather than duplicated per provider.
+ * prompt, the message list, the spoiler guard - and knows nothing about this
+ * transport beyond the `ProviderStream` shape, which is what keeps the guard
+ * and the rung discipline independent of it.
  */
 
 import type { ModelId } from '../shared/types.ts';
-import { streamMessage, type ApiMessage } from './anthropic.ts';
 import { streamClaudeCode, type NativeConnect } from './claude-code.ts';
+
+export interface ApiMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
 export interface ProviderRequest {
   model: ModelId;
@@ -18,12 +22,7 @@ export interface ProviderRequest {
   /** Oldest first. The last entry is always the current user turn. */
   messages: ApiMessage[];
   onText(text: string): void;
-  /**
-   * The transport is up and the model turn is genuinely under way. Both
-   * providers have a moment that means this - the CLI's init frame, and the
-   * API's `message_start` - so the panel can tell "still connecting" from
-   * "thinking" identically either way.
-   */
+  /** The CLI has booted and is genuinely about to call the API. */
   onStarted?(): void;
   /** Repeated for as long as the model thinks without producing text. */
   onThinking?(): void;
@@ -31,22 +30,6 @@ export interface ProviderRequest {
 }
 
 export type ProviderStream = (request: ProviderRequest) => Promise<void>;
-
-/** Streams from api.anthropic.com with a key read from the vault. */
-export function apiKeyProvider(options: { apiKey: string; fetchImpl?: typeof fetch }): ProviderStream {
-  return (request) =>
-    streamMessage({
-      apiKey: options.apiKey,
-      model: request.model,
-      system: request.system,
-      messages: request.messages,
-      onText: request.onText,
-      ...(request.onStarted ? { onStarted: request.onStarted } : {}),
-      ...(request.onThinking ? { onThinking: request.onThinking } : {}),
-      ...(request.signal ? { signal: request.signal } : {}),
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    });
-}
 
 /**
  * Renders the message list as one prompt.
@@ -75,10 +58,6 @@ export function flattenMessages(messages: ApiMessage[]): string {
   );
 }
 
-/**
- * Streams from the local `claude` CLI through the native host, on whatever
- * subscription that CLI is logged into.
- */
 export function claudeCodeProvider(options: { connect?: NativeConnect } = {}): ProviderStream {
   return (request) =>
     streamClaudeCode({

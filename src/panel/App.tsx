@@ -10,7 +10,6 @@ import {
   type AttemptRecord,
   type ModelId,
   type PageSnapshot,
-  type ProviderId,
   type Rung,
   type Settings,
   type StoredSession,
@@ -104,7 +103,6 @@ export function App(): ReactNode {
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<AppError | null>(null);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  const [keyState, setKeyState] = useState<ProbeState>('unknown');
   const [claudeState, setClaudeState] = useState<ProbeState>('unknown');
   const [claudeAccess, setClaudeAccess] = useState<ClaudeAccess | null>(null);
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
@@ -550,12 +548,10 @@ export function App(): ReactNode {
 
   const nextRung = (): Rung => (started ? (Math.min(rung + 1, 5) as Rung) : 0);
 
-  // Each change is a patch against the writer's own newest intent, not against
-  // this render's `settings` - switching provider and then model is faster than
-  // a round trip, and a whole-object write built from stale state undoes the
-  // change before it. See `settings-writer.ts`.
+  // A patch against the writer's own newest intent, not against this render's
+  // `settings` - a whole-object write built from stale state would undo a
+  // change still in flight. See `settings-writer.ts`.
   const onSelectModel = (model: ModelId): void => settingsWriter.patch({ model });
-  const onSelectProvider = (provider: ProviderId): void => settingsWriter.patch({ provider });
 
   const onResume = (session: StoredSession): void => {
     setTurns(session.turns);
@@ -594,8 +590,8 @@ export function App(): ReactNode {
     setResumable(null);
   };
 
-  // Loaded when Settings opens, so the panel can name the configured Dashlane
-  // item and the resolved claude binary instead of hardcoding either.
+  // Loaded when Settings opens, so the panel can name the resolved claude
+  // binary instead of hardcoding it.
   const openSettings = (): void => {
     const opening = !showSettings;
     setShowSettings(opening);
@@ -603,19 +599,8 @@ export function App(): ReactNode {
       void client
         .hostInfo()
         .then(setHostInfo)
-        .catch(() => setHostInfo({ itemTitle: 'unknown (the native helper did not answer)', claudePath: null }));
+        .catch(() => setHostInfo({ claudePath: null }));
     }
-  };
-
-  const onProbeKey = (): void => {
-    setKeyState('checking');
-    client
-      .probeKey()
-      .then(() => setKeyState('ok'))
-      .catch((failure: AppError) => {
-        setKeyState('failed');
-        setError(failure);
-      });
   };
 
   const onProbeClaude = (): void => {
@@ -659,21 +644,15 @@ export function App(): ReactNode {
 
       {/*
         A sheet takes over the column rather than sitting on top of the
-        transcript. Settings is taller than it was once the provider choice and
-        its caveats are on it, and half a sheet with the transcript bleeding out
-        from under it reads as a rendering bug rather than a layer.
+        transcript, so it never reads as a rendering bug half-covering it.
       */}
       {showSettings ? (
         <SettingsPanel
-          provider={settings.provider}
           model={settings.model}
-          keyState={keyState}
           claudeState={claudeState}
           claudeAccess={claudeAccess}
           hostInfo={hostInfo}
-          onSelectProvider={onSelectProvider}
           onSelectModel={onSelectModel}
-          onProbeKey={onProbeKey}
           onProbeClaude={onProbeClaude}
           onClose={() => setShowSettings(false)}
         />

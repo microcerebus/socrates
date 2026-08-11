@@ -1,11 +1,11 @@
 /**
- * The extension half of the Claude Code provider: a streaming conversation with
- * the native host over `chrome.runtime.connectNative`.
+ * The extension half of the Claude Code transport: a streaming conversation
+ * with the native host over `chrome.runtime.connectNative`.
  *
- * The key fetch is one message in, one message out, so it rides
- * `sendNativeMessage` and always will. A model reply cannot: it arrives as
- * hundreds of small frames over tens of seconds, and `sendNativeMessage` gives
- * you exactly one. So this opens a port instead.
+ * A request/response call like `ping` is one message in, one message out, so it
+ * rides `sendNativeMessage` (see `native-host-client.ts`). A model reply cannot:
+ * it arrives as hundreds of small frames over tens of seconds, and
+ * `sendNativeMessage` gives you exactly one. So this opens a port instead.
  *
  * One port per turn, deliberately. A port that outlives a request has to grow
  * routing, reconnection and staleness rules to be trustworthy; a port that dies
@@ -15,7 +15,7 @@
  * the child cleanly rather than being shot out from under it.
  */
 
-import { NATIVE_HOST_NAME } from './keychain.ts';
+import { NATIVE_HOST_NAME } from './native-host-client.ts';
 import { hostFailureToAppError, isHostResponse } from './host-errors.ts';
 import type { HostRequest } from '../native-host/protocol.ts';
 import { appError, type ModelId } from '../shared/types.ts';
@@ -151,9 +151,8 @@ export async function streamClaudeCode(options: ClaudeCodeStreamOptions): Promis
 function nativeHostMissing(cause: unknown): ReturnType<typeof appError> {
   return appError(
     'native-host-missing',
-    `Socrates could not reach its native helper (${NATIVE_HOST_NAME}). On the Claude Code provider that helper ` +
-      `is what runs the claude CLI, so nothing works without it. Install it once, then reload the extension. ` +
-      `(${String(cause)})`,
+    `Socrates could not reach its native helper (${NATIVE_HOST_NAME}). That helper is what runs the claude CLI, ` +
+      `so nothing works without it. Install it once, then reload the extension. (${String(cause)})`,
     [{ label: 'Run this from the repo root', command: './bin/install-native-host.sh' }],
   );
 }
