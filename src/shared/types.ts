@@ -44,25 +44,83 @@ export interface ProblemContext {
   title: string;
   url: string | null;
   difficulty: string | null;
+  /** The number LeetCode prints before the title ("1" for "1. Two Sum"), when there is one. */
+  number: string | null;
   /** The prose statement, newline-separated plain text. */
   statement: string;
   /** Example blocks, verbatim. */
   examples: string[];
   /** Constraint bullets, verbatim. */
   constraints: string[];
+  /**
+   * LeetCode's own topic tags, e.g. `['Array', 'Hash Table']`.
+   *
+   * **Model context only.** These name the intended technique, and on the page
+   * they sit behind a collapsed "Topics" toggle the user has usually not opened.
+   * The panel must never render them at any rung; see the spoiler boundary in
+   * `src/prompt/system-prompt.ts` and the guard in `src/prompt/spoiler-guard.ts`.
+   */
+  topicTags: string[];
+  /** Whether an editorial tab exists. A boolean, never its content. */
+  hasEditorial: boolean;
+  /** Whether the problem ships hints. A boolean, never their content. */
+  hasHints: boolean;
   source: ContextSource;
 }
 
 export interface EditorContext {
-  /** Monaco language id (`javascript`, `typescript`, `python`, ...). */
+  /** A LeetCode language id (`javascript`, `python3`, `golang`, ...). See `languages.ts`. */
   language: string;
   code: string;
   source: ContextSource | 'unavailable';
 }
 
+/** How LeetCode's judge answered. The strings are LeetCode's own, in English. */
+export type RunVerdict =
+  | 'Accepted'
+  | 'Wrong Answer'
+  | 'Time Limit Exceeded'
+  | 'Memory Limit Exceeded'
+  | 'Output Limit Exceeded'
+  | 'Runtime Error'
+  | 'Compile Error'
+  | 'Internal Error'
+  | 'Invalid Testcase'
+  | 'Finished'
+  | 'other';
+
+/**
+ * The run/submission result panel, when the user has run something.
+ *
+ * This is what turns "check my code" from a reading exercise into a diagnosis:
+ * with the failing input and the two outputs in hand the interviewer can talk
+ * about the actual defect. Every field is optional because the panel shows
+ * different subsets per verdict - an accepted run has no `expected`, a compile
+ * error has no testcase at all.
+ */
+export interface RunResult {
+  /** Whether this came from Run (custom testcases) or Submit (the full set). */
+  kind: 'run' | 'submission';
+  /** Verbatim from the page, so an unmapped verdict still reaches the model. */
+  verdictText: string;
+  verdict: RunVerdict;
+  /** "35 / 57 testcases passed", when the page shows a tally. */
+  testcases: string | null;
+  /** The failing (or last executed) input. */
+  input: string | null;
+  output: string | null;
+  expected: string | null;
+  /** Anything the code printed. */
+  stdout: string | null;
+  /** The compiler or runtime message, on the verdicts that carry one. */
+  errorMessage: string | null;
+}
+
 export interface PageSnapshot {
   problem: ProblemContext;
   editor: EditorContext;
+  /** `null` whenever the console has no result on screen, which is most of the time. */
+  run: RunResult | null;
   capturedAt: number;
 }
 

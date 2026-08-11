@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { TOTAL_HINTS, hintsUsedFor } from '../prompt/rungs.ts';
+import { DEFAULT_LANGUAGE_ID } from '../shared/languages.ts';
 import type { AskRequest } from '../shared/protocol.ts';
 import {
   DEFAULT_SETTINGS,
@@ -20,6 +21,7 @@ import {
   ErrorNotice,
   Header,
   Ladder,
+  LanguagePicker,
   PasteForm,
   ResumeOffer,
   SettingsPanel,
@@ -82,9 +84,40 @@ export function App(): ReactNode {
   const reducedMotion = usePrefersReducedMotion();
 
   const [snapshot, setSnapshot] = useState<PageSnapshot | null>(null);
+
+  /*
+   * What is actually on screen, held outside React.
+   *
+   * Every capture has to be judged against the newest one the panel has already
+   * accepted, and a render closure is not that: the focus follower and a turn
+   * can have reads in flight at the same time, and whichever resolves second is
+   * still holding the `snapshot` from the render that started it. Classifying
+   * against that stale value lets an older read look like a legitimate refresh
+   * and overwrite a newer one. Same reasoning as `session-writer.ts` and
+   * `settings-writer.ts`: the thing that arbitrates a race cannot itself be
+   * render-scoped.
+   */
+  const showingRef = useRef<PageSnapshot | null>(null);
+
+  /** The only way the panel changes what it is looking at. Keeps the ref in step. */
+  const showSnapshot = useCallback((next: PageSnapshot): void => {
+    showingRef.current = next;
+    setSnapshot(next);
+  }, []);
   const [captureFailure, setCaptureFailure] = useState<string | null>(null);
   const [showPaste, setShowPaste] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+
+  /*
+   * The language is the page's until the user says otherwise.
+   *
+   * Mirroring is the default because the panel is a view of LeetCode: switching
+   * the editor to Rust and then being handed Python pseudocode would be the
+   * panel disagreeing with the thing it is sitting next to. An explicit pick
+   * from the dropdown is a departure from that, so it holds for the sitting -
+   * `null` means "follow the page", and that is what the reset restores.
+   */
+  const [languageOverride, setLanguageOverride] = useState<string | null>(null);
 
   const [rung, setRung] = useState<Rung>(0);
   const [deepestRung, setDeepestRung] = useState<Rung>(0);
@@ -169,6 +202,11 @@ export function App(): ReactNode {
 
   const elapsedMs = Math.max(0, now - sessionStart);
 
+  // Re-read from the snapshot every render, so a language changed in the
+  // LeetCode toolbar mid-session is followed as soon as the next capture lands.
+  const pageLanguage = snapshot?.editor.language ?? null;
+  const language = languageOverride ?? pageLanguage ?? DEFAULT_LANGUAGE_ID;
+
   // The live attempt is upserted as the user climbs, so it is already in the
   // stored list; showing it back as "an earlier attempt" would be a lie.
   const attempts = useMemo(
@@ -215,7 +253,11 @@ export function App(): ReactNode {
       if (!capture.current) return;
       const { snapshot: page, failure } = capture.value;
       if (page) {
-        setSnapshot(page);
+        // Classified rather than taken: the follower can have adopted the same
+        // problem from a later read while this first one was outstanding.
+        const outcome = classifyCapture(showingRef.current, page);
+        if (outcome.kind === 'unchanged') return;
+        showSnapshot(outcome.snapshot);
         sessionWriter.setActive(page.problem.slug);
         loadAttempts(page.problem.slug);
         offerResume(page.problem.slug);
@@ -224,7 +266,7 @@ export function App(): ReactNode {
         setShowPaste(true);
       }
     })();
-  }, [capturePage, client, loadAttempts, offerResume, sessionWriter, settingsWriter]);
+  }, [capturePage, client, loadAttempts, offerResume, sessionWriter, settingsWriter, showSnapshot]);
 
   // ---- saving the session -------------------------------------------------
 
@@ -294,10 +336,14 @@ export function App(): ReactNode {
       sessionWriter.setActive(next.problem.slug);
 
       const startedAt = Date.now();
-      setSnapshot(next);
+      showSnapshot(next);
       setTurns([]);
       setRung(0);
       setDeepestRung(0);
+      // A different problem is a different sitting, and the new page carries its
+      // own selected language. Keeping the old override would silently answer
+      // the next problem in a language the editor is not set to.
+      setLanguageOverride(null);
       setStarted(false);
       setStreaming(null);
       setProgress(IDLE_PROGRESS);
@@ -319,6 +365,7 @@ export function App(): ReactNode {
       rung,
       sessionStart,
       sessionWriter,
+      showSnapshot,
       snapshot,
       turns,
     ],
@@ -333,28 +380,33 @@ export function App(): ReactNode {
   const snapshotForTurn = useCallback(async (): Promise<PageSnapshot | null> => {
     /*
      * The capture is guarded at resolution, not at initiation. If the panel
-     * followed the page while it was outstanding, `snapshot` and everything else
-     * this callback closed over describe a problem the user has left - and
-     * classifying a stale capture of that problem against that stale snapshot
-     * reads as an ordinary refresh, which would drag the panel back to it and
-     * then run and stream a turn there. The turn is abandoned instead; the panel
-     * has already adopted the new problem.
+     * followed the page while it was outstanding, everything this callback closed
+     * over describes a problem the user has left - and classifying a stale
+     * capture of that problem against that stale snapshot reads as an ordinary
+     * refresh, which would drag the panel back to it and then run and stream a
+     * turn there. The turn is abandoned instead; the panel has already adopted
+     * the new problem.
+     *
+     * Which is also why the comparison is against `showingRef` rather than the
+     * closure: the focus follower may have taken a newer read of *this* problem
+     * while this one was outstanding, and the turn should run on that, not walk
+     * the panel back to a buffer the user has already typed past.
      */
     const capture = await capturePage();
     if (!capture.current) return null;
 
-    const outcome = classifyCapture(snapshot, capture.value.snapshot);
+    const outcome = classifyCapture(showingRef.current, capture.value.snapshot);
     switch (outcome.kind) {
       case 'unchanged':
-        return snapshot;
+        return showingRef.current;
       case 'refreshed':
-        setSnapshot(outcome.snapshot);
+        showSnapshot(outcome.snapshot);
         return outcome.snapshot;
       case 'switched':
         adoptProblem(outcome.snapshot);
         return null;
     }
-  }, [adoptProblem, capturePage, snapshot]);
+  }, [adoptProblem, capturePage, showSnapshot]);
 
   /*
    * Notice the navigation when it happens rather than at the next click, so the
@@ -378,14 +430,30 @@ export function App(): ReactNode {
      */
     const follow = (): void => {
       void (async () => {
-        let showing = snapshot;
         for (let step = 0; step < MAX_FOLLOW_STEPS; step += 1) {
           const capture = await capturePage();
           if (!capture.current) return; // a newer adoption already superseded this read
-          const outcome = classifyCapture(showing, capture.value.snapshot);
+          /*
+           * Against the ref, not a local: this loop awaits, and a turn can accept
+           * a newer read of the same problem in the gap. Carrying its own idea of
+           * what is on screen would let this read look newer than it is.
+           */
+          const outcome = classifyCapture(showingRef.current, capture.value.snapshot);
+          /*
+           * Same problem, newer page. Worth taking rather than dropping: the
+           * editor language lives on the snapshot, and the panel says which
+           * language it is answering in. Discarding refreshes would leave that
+           * claim stale until the next turn - the user switches LeetCode to Rust
+           * and the panel goes on saying C++ while quietly answering in Rust.
+           * Nothing else the panel holds moves, so this is a display update, not
+           * an adoption: no reset, no epoch bump.
+           */
+          if (outcome.kind === 'refreshed') {
+            showSnapshot(outcome.snapshot);
+            return;
+          }
           if (outcome.kind !== 'switched') return;
           adoptProblem(outcome.snapshot);
-          showing = outcome.snapshot;
         }
       })();
     };
@@ -395,13 +463,23 @@ export function App(): ReactNode {
         if (active === tabId) follow();
       });
     };
+    /*
+     * Changing the editor language fires no tab event - LeetCode swaps a Monaco
+     * model, the URL does not move - so the tab listeners alone would never
+     * notice. Focus is the event that does fit: the panel is docked beside the
+     * page, so touching the toolbar blurs it and coming back to ask a question
+     * focuses it again, which is exactly the moment the panel needs to be
+     * telling the truth. It is still an event, not a poll.
+     */
     chrome.tabs.onUpdated.addListener(onUpdated);
     chrome.tabs.onActivated.addListener(follow);
+    globalThis.addEventListener('focus', follow);
     return () => {
       chrome.tabs.onUpdated.removeListener(onUpdated);
       chrome.tabs.onActivated.removeListener(follow);
+      globalThis.removeEventListener('focus', follow);
     };
-  }, [adoptProblem, capturePage, snapshot]);
+  }, [adoptProblem, capturePage, showSnapshot]);
 
   const persistAttempt = useCallback(
     (deepest: Rung, current: PageSnapshot) => {
@@ -496,6 +574,10 @@ export function App(): ReactNode {
         rung: targetRung,
         message,
         snapshot: current,
+        // Resolved against the capture this turn is actually running on, not
+        // against the render's snapshot: switching the LeetCode editor and
+        // immediately asking should already be answered in the new language.
+        language: languageOverride ?? current.editor.language ?? DEFAULT_LANGUAGE_ID,
         history: turns,
         elapsedMs: Date.now() - sessionStart,
       };
@@ -554,6 +636,7 @@ export function App(): ReactNode {
     [
       client,
       deepestRung,
+      languageOverride,
       pace,
       persistAttempt,
       reducedMotion,
@@ -730,7 +813,9 @@ export function App(): ReactNode {
         <PasteForm
           reason={captureFailure}
           onSubmit={(pasted) => {
-            setSnapshot(pasted);
+            // Through the same setter as every capture, so the next read of the
+            // page is classified against the paste and loses to it.
+            showSnapshot(pasted);
             sessionWriter.setActive(pasted.problem.slug);
             setShowPaste(false);
             setCaptureFailure(null);
@@ -773,10 +858,27 @@ export function App(): ReactNode {
               onSend={(text) => void ask('chat', rung, text)}
               onCancel={() => cancelRef.current?.()}
             />
-            <p className="small footnote">
-              {hintsUsedFor(rung)} of {TOTAL_HINTS} hints used · replies never go past the rung you
-              unlocked
-            </p>
+            {/*
+              Below the composer rather than above the ladder: the ladder is what
+              the footer is for, and the language is a setting you check rather
+              than a control you reach for every turn. It still has to be visible
+              - it shapes every reply - so it sits on the same quiet line as the
+              hint counter and wraps onto its own when the panel is narrow.
+            */}
+            <div className="footer-meta">
+              <LanguagePicker
+                language={language}
+                pageLanguage={pageLanguage}
+                overridden={languageOverride !== null}
+                disabled={disabled}
+                onSelect={(next) => setLanguageOverride(next === pageLanguage ? null : next)}
+                onFollowPage={() => setLanguageOverride(null)}
+              />
+              <p className="small footnote">
+                {hintsUsedFor(rung)} of {TOTAL_HINTS} hints used · replies never go past the rung
+                you unlocked
+              </p>
+            </div>
           </footer>
         </>
       )}

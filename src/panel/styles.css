@@ -778,16 +778,130 @@ input:not([type]) {
 }
 
 textarea:focus,
-input:focus {
+input:focus,
+select:focus {
   outline: 2px solid color-mix(in srgb, var(--rung) 35%, transparent);
   border-color: var(--rung);
 }
 
 /* One visible focus ring for every control, in the rung's own colour. */
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid var(--rung);
   outline-offset: 2px;
+}
+
+/*
+ * The one kind of `select` in the panel, styled rather than left to the platform.
+ *
+ * `appearance: none` plus a drawn chevron is what makes it match the buttons
+ * either side of it: the native control paints its own background from the OS
+ * theme, which under Catppuccin lands as a grey slab in Mocha and a white one in
+ * Latte, agreeing with neither. `color-scheme` is still set on `:root`, so the
+ * dropdown list itself - which is OS chrome and cannot be styled - opens in the
+ * right scheme.
+ */
+select {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 24px 4px 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-sunk);
+  color: var(--text);
+  appearance: none;
+  cursor: pointer;
+  max-width: 100%;
+  width: 100%;
+}
+
+select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--rung) 45%, var(--border));
+}
+
+select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/*
+ * The chevron, drawn in CSS rather than embedded.
+ *
+ * It was two SVG data URIs with the hex for `--text-muted` written into each,
+ * one per scheme - which made the palette a thing that had to be kept in step by
+ * hand in a place no one would think to look, and silently desynced the moment a
+ * token moved. A data URI cannot interpolate `var()`, so the way out is not to
+ * put colour in the image at all: two rotated borders read the token directly,
+ * and there is nothing left to keep in step.
+ *
+ * It hangs off a wrapper because Chrome does not render pseudo-elements on a
+ * `select` itself. `.select-shell` is that wrapper everywhere a select appears.
+ */
+.select-shell {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.select-shell::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  top: calc(50% - 2px);
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: translateY(-50%) rotate(45deg);
+  pointer-events: none;
+}
+
+/* The paste sheet's field wants a full-width select, the footer's wants a snug one. */
+.field .select-shell {
+  display: flex;
+}
+
+.field select {
+  font-size: 13px;
+  padding: 8px 26px 8px 10px;
+  background: var(--bg);
+}
+
+/*
+ * Two stacked lines, not a toolbar row.
+ *
+ * Side by side they do not fit: a native `select` sizes itself to its widest
+ * option ("MS SQL Server"), which leaves the promise about rungs wrapping to
+ * four ragged lines in a panel this narrow. Stacked, the language reads as a
+ * setting and the promise keeps its centred footnote shape.
+ */
+.footer-meta {
+  margin-top: 8px;
+}
+
+.language-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.language-pick {
+  display: inline-flex;
+  min-width: 0;
+}
+
+/*
+ * The reset back to mirroring, sized to sit with the muted text beside it. It
+ * refuses to break: "follow LeetCode (C++)" split across two lines mid-phrase
+ * reads as a wrapping accident, so the row wraps instead and the link keeps its
+ * shape at any width the side panel can be dragged to.
+ */
+.language-row .link {
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 .footnote {

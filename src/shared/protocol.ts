@@ -13,6 +13,7 @@ import type {
   EditorContext,
   PageSnapshot,
   ProblemContext,
+  RunResult,
   Rung,
   Settings,
   StoredSession,
@@ -29,6 +30,15 @@ export interface AskRequest {
   /** Free-form user message. Empty for pure ladder unlocks. */
   message: string;
   snapshot: PageSnapshot;
+  /**
+   * The language the reply should be written for: the one LeetCode's editor is
+   * set to, unless the user has overridden it in the panel.
+   *
+   * Carried separately from `snapshot.editor.language` rather than written over
+   * it, because the two are different facts - what the page says, and what the
+   * user asked for - and the panel shows both.
+   */
+  language: string;
   /** Prior turns, oldest first. */
   history: Turn[];
   /** Milliseconds since the session started, for the model's sense of pacing. */
@@ -94,7 +104,7 @@ export type WorkerFrameBody = DistributiveOmit<WorkerFrame, 'id'>;
 export type ContentRequest = { kind: 'scrape' };
 
 export type ContentResponse =
-  | { ok: true; problem: ProblemContext; editor: EditorContext }
+  | { ok: true; problem: ProblemContext; editor: EditorContext; run: RunResult | null }
   | { ok: false; reason: string; detail?: string };
 
 /** Messages exchanged between the isolated content script and the MAIN-world bridge. */

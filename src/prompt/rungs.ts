@@ -175,7 +175,7 @@ export const RUNGS: readonly RungSpec[] = [
     lockedPhrase: 'give a working solution or a line-level rewrite of their code',
     countsAsHint: true,
     reveals: [
-      'A complete, working TypeScript or JavaScript solution.',
+      'A complete, working solution in the language they are writing.',
       'Time and space complexity with a one-line justification for each.',
       "A review of the user's own code against that solution: what they got right, what breaks, and the smallest change that would have got them there.",
       'The idea to remember for next time, in one sentence.',

@@ -488,9 +488,54 @@ describe('following the page to another problem', () => {
     problem: { ...SNAPSHOT.problem, slug: 'lru-cache', title: '146. LRU Cache' },
   };
 
-  it('treats a capture of the same problem as a refresh, not a switch', () => {
-    const outcome = classifyCapture(twoSum, { ...twoSum, capturedAt: 2 });
+  it('treats a newer capture of the same problem as a refresh, not a switch', () => {
+    const outcome = classifyCapture(twoSum, { ...twoSum, capturedAt: twoSum.capturedAt + 1 });
     expect(outcome.kind).toBe('refreshed');
+  });
+
+  /**
+   * Two reads of the *same* problem still have an order.
+   *
+   * The panel captures on focus, on tab events and again at the start of every
+   * turn, so two reads of the problem on screen are routinely in flight at once.
+   * The navigation epoch says nothing about these - same problem, same epoch -
+   * so without an explicit comparison the loser overwrites the winner, and the
+   * panel walks back to a staler editor buffer, language and run result. Worse,
+   * `snapshotForTurn` would then run the turn against that staler read.
+   */
+  describe('two reads of the same problem', () => {
+    const fresh: PageSnapshot = {
+      ...twoSum,
+      capturedAt: twoSum.capturedAt + 1000,
+      editor: { ...twoSum.editor, language: 'rust', code: 'fn two_sum() {}' },
+    };
+    const stale: PageSnapshot = {
+      ...twoSum,
+      capturedAt: twoSum.capturedAt + 500,
+      editor: { ...twoSum.editor, language: 'cpp', code: 'class Solution {};' },
+    };
+
+    it('takes the newer read', () => {
+      expect(classifyCapture(stale, fresh)).toEqual({ kind: 'refreshed', snapshot: fresh });
+    });
+
+    it('refuses an older read that resolves after a newer one', () => {
+      // The overlap: a focus capture issued first, a turn capture issued second
+      // and resolving first. The focus one must not be able to undo it.
+      expect(classifyCapture(fresh, stale)).toEqual({ kind: 'unchanged' });
+    });
+
+    it('keeps the incumbent on a tie, rather than churning for no freshness', () => {
+      const sameMillisecond: PageSnapshot = { ...stale, capturedAt: fresh.capturedAt };
+      expect(classifyCapture(fresh, sameMillisecond)).toEqual({ kind: 'unchanged' });
+    });
+
+    it('still follows a navigation however old the read looks', () => {
+      // Ordering is a same-problem rule only. A different slug is a navigation,
+      // and the epoch - not `capturedAt` - is what settles those.
+      const older: PageSnapshot = { ...lruCache, capturedAt: 1 };
+      expect(classifyCapture(fresh, older)).toEqual({ kind: 'switched', snapshot: older });
+    });
   });
 
   /* The blocker: this used to be discarded, leaving the panel on the old slug. */
@@ -693,23 +738,32 @@ describe('rapid navigation with out-of-order resolutions', () => {
   });
 
   /**
-   * The follower from `App.tsx`, with React removed: read, drop if stale,
-   * adopt on a switch, and read again until it settles.
+   * The follower from `App.tsx`, with React removed: read, drop if stale, adopt
+   * on a switch, take a newer read of the same problem, and read again until it
+   * settles.
+   *
+   * `showing` is a box rather than a local, mirroring `showingRef` in the panel
+   * for the same reason it exists there: what is on screen is shared with the
+   * turn path, and a follower that carried its own copy would judge a late read
+   * against a value the panel had already moved past.
    */
   async function follow(
     w: ReturnType<typeof createSessionWriter>,
-    start: PageSnapshot | null,
+    showing: { current: PageSnapshot | null },
     read: () => Promise<PageSnapshot | null>,
     adopt: (next: PageSnapshot) => void,
   ): Promise<void> {
-    let showing = start;
     for (let step = 0; step < 5; step += 1) {
       const capture = await w.ifStillCurrent(read);
       if (!capture.current) return;
-      const outcome = classifyCapture(showing, capture.value);
+      const outcome = classifyCapture(showing.current, capture.value);
+      if (outcome.kind === 'refreshed') {
+        showing.current = outcome.snapshot;
+        return;
+      }
       if (outcome.kind !== 'switched') return;
       adopt(outcome.snapshot);
-      showing = outcome.snapshot;
+      showing.current = outcome.snapshot;
     }
   }
 
@@ -744,7 +798,7 @@ describe('rapid navigation with out-of-order resolutions', () => {
   it('lands on C when the newest capture resolves first', async () => {
     const { writer: w, adopt, adopted } = panel();
     w.setActive('a');
-    await follow(w, page('a'), pageReader([page('c')], page('c')), adopt);
+    await follow(w, { current: page('a') }, pageReader([page('c')], page('c')), adopt);
     expect(adopted).toEqual(['c']);
     expect(w.active).toBe('c');
   });
@@ -753,7 +807,7 @@ describe('rapid navigation with out-of-order resolutions', () => {
   it('lands on C when a stale B capture resolves first', async () => {
     const { writer: w, adopt, adopted } = panel();
     w.setActive('a');
-    await follow(w, page('a'), pageReader([page('b')], page('c')), adopt);
+    await follow(w, { current: page('a') }, pageReader([page('b')], page('c')), adopt);
     expect(adopted.at(-1)).toBe('c');
     expect(w.active).toBe('c');
   });
@@ -764,7 +818,7 @@ describe('rapid navigation with out-of-order resolutions', () => {
 
     let release!: (value: PageSnapshot) => void;
     const slow = new Promise<PageSnapshot>((r) => (release = r));
-    const pending = follow(w, page('a'), () => slow, adopt);
+    const pending = follow(w, { current: page('a') }, () => slow, adopt);
 
     // Another follower wins the race and adopts C first.
     adopt(page('c'));
@@ -777,7 +831,7 @@ describe('rapid navigation with out-of-order resolutions', () => {
   it('settles without adopting anything when the page never moved', async () => {
     const { writer: w, adopt, adopted } = panel();
     w.setActive('a');
-    await follow(w, page('a'), pageReader([], page('a')), adopt);
+    await follow(w, { current: page('a') }, pageReader([], page('a')), adopt);
     expect(adopted).toEqual([]);
     expect(w.epoch).toBe(1);
   });
@@ -786,7 +840,7 @@ describe('rapid navigation with out-of-order resolutions', () => {
     const { writer: w, adopt, adopted } = panel();
     w.setActive('a');
     let n = 0;
-    await follow(w, page('a'), () => Promise.resolve(page(`p-${(n += 1)}`)), adopt);
+    await follow(w, { current: page('a') }, () => Promise.resolve(page(`p-${(n += 1)}`)), adopt);
     expect(adopted).toHaveLength(5);
   });
 
@@ -794,7 +848,7 @@ describe('rapid navigation with out-of-order resolutions', () => {
     for (const queue of [[page('b'), page('c')], [page('c')], [page('c'), page('c')]]) {
       const { writer: w, adopt } = panel();
       w.setActive('a');
-      await follow(w, page('a'), pageReader(queue, page('c')), adopt);
+      await follow(w, { current: page('a') }, pageReader(queue, page('c')), adopt);
       expect(w.active).toBe('c');
     }
   });
@@ -810,12 +864,79 @@ describe('rapid navigation with out-of-order resolutions', () => {
   it('settles on what the page currently reports and waits for the next event', async () => {
     const { writer: w, adopt, adopted } = panel();
     w.setActive('a');
-    await follow(w, page('a'), pageReader([page('b')], page('b')), adopt);
+    await follow(w, { current: page('a') }, pageReader([page('b')], page('b')), adopt);
     expect(adopted).toEqual(['b']);
 
     // The later navigation to C arrives as its own event.
-    await follow(w, page('b'), pageReader([], page('c')), adopt);
+    await follow(w, { current: page('b') }, pageReader([], page('c')), adopt);
     expect(w.active).toBe('c');
+  });
+
+  /**
+   * The other overlap, on one problem rather than three.
+   *
+   * The focus follower and a turn both read the page, and they can resolve in
+   * either order. The epoch cannot separate them - same problem, same epoch - so
+   * this is what `capturedAt` is for. The stake is concrete: the loser's read
+   * carries an older editor buffer and an older *language*, so accepting it
+   * would have the panel claim C++ and review code the user has already
+   * replaced.
+   */
+  describe('a focus read and a turn read overlapping on one problem', () => {
+    const at = (capturedAt: number, language: string, code: string): PageSnapshot => ({
+      ...SNAPSHOT,
+      capturedAt,
+      editor: { ...SNAPSHOT.editor, language, code },
+    });
+
+    /** The turn path from `App.tsx`: classify, take a refresh, hand it to the turn. */
+    function turnRead(
+      showing: { current: PageSnapshot | null },
+      captured: PageSnapshot,
+    ): PageSnapshot | null {
+      const outcome = classifyCapture(showing.current, captured);
+      if (outcome.kind === 'refreshed') showing.current = outcome.snapshot;
+      return outcome.kind === 'switched' ? null : showing.current;
+    }
+
+    it('keeps the newer read when the older one resolves last', async () => {
+      const { writer: w, adopt } = panel();
+      w.setActive('two-sum');
+      const showing = { current: at(1_000, 'cpp', 'class Solution {};') };
+
+      // The turn's read is issued second and lands first.
+      const forTurn = turnRead(showing, at(3_000, 'rust', 'fn two_sum() {}'));
+      expect(forTurn?.editor.language).toBe('rust');
+
+      // The focus follower's read was issued first and resolves now, carrying
+      // the buffer as it was two seconds ago.
+      await follow(
+        w,
+        showing,
+        () => Promise.resolve(at(2_000, 'cpp', 'class Solution {};')),
+        adopt,
+      );
+
+      expect(showing.current?.capturedAt).toBe(3_000);
+      expect(showing.current?.editor.language).toBe('rust');
+      expect(showing.current?.editor.code).toBe('fn two_sum() {}');
+    });
+
+    it('runs the turn on the newest read even when the turn read is the stale one', async () => {
+      const { writer: w, adopt } = panel();
+      w.setActive('two-sum');
+      const showing = { current: at(1_000, 'cpp', 'class Solution {};') };
+
+      // Focus got there first with the newer buffer.
+      await follow(w, showing, () => Promise.resolve(at(3_000, 'rust', 'fn two_sum() {}')), adopt);
+
+      // The turn's own read is older; the turn must still run on the newer one.
+      const forTurn = turnRead(showing, at(2_000, 'cpp', 'class Solution {};'));
+      expect(forTurn?.capturedAt).toBe(3_000);
+      expect(forTurn?.editor.language).toBe('rust');
+      // And nothing was adopted - this was never a navigation.
+      expect(w.epoch).toBe(1);
+    });
   });
 });
 

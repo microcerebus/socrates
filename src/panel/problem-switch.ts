@@ -21,14 +21,37 @@
  * pseudocode for a problem where nothing had been earned - the ladder defeated
  * by the back button. A switch therefore closes the old session and starts the
  * new one at rung 0, like any other first visit.
+ *
+ * ## Two reads of the *same* problem still have an order
+ *
+ * The navigation epoch in `session-writer.ts` settles reads across a problem
+ * change, but it says nothing about two reads of the problem already on screen -
+ * and there are routinely two in flight, because the panel captures on focus, on
+ * tab events and again at the start of every turn. They can resolve in either
+ * order, and the loser carries a staler editor buffer, a staler language and a
+ * staler run result. Adopting it would walk the panel back to the code as it was
+ * a second ago, and worse, `snapshotForTurn` would then run the turn against it -
+ * reviewing a buffer the user has already moved past.
+ *
+ * So a same-problem capture must be strictly newer than what is on screen to be
+ * worth anything. `capturedAt` is the measure: it is stamped in the service
+ * worker once the content script has answered, which is exactly "how fresh is
+ * this reading of the page". A tie keeps the incumbent, because two reads from
+ * the same millisecond are equally fresh and churning the snapshot for one of
+ * them buys nothing.
  */
 
 import type { PageSnapshot } from '../shared/types.ts';
 
 export type CaptureOutcome =
-  /** Nothing usable came back. Keep showing what we already have. */
+  /**
+   * Nothing worth adopting: no capture came back, the panel is on a pasted
+   * problem, or this is an older read of the problem already on screen. All
+   * three mean the same thing to the caller - keep what you have - and none of
+   * them is an error.
+   */
   | { kind: 'unchanged' }
-  /** The same problem, with a newer editor buffer. */
+  /** The same problem, read more recently than what is on screen. */
   | { kind: 'refreshed'; snapshot: PageSnapshot }
   /** A different problem. The panel has to follow the page. */
   | { kind: 'switched'; snapshot: PageSnapshot };
@@ -48,7 +71,11 @@ export function classifyCapture(
   if (current !== null && current.problem.source === 'manual') return { kind: 'unchanged' };
 
   if (current === null) return { kind: 'switched', snapshot: captured };
-  return current.problem.slug === captured.problem.slug
+  if (current.problem.slug !== captured.problem.slug)
+    return { kind: 'switched', snapshot: captured };
+
+  // Same problem: only a strictly newer read is worth anything. See the header.
+  return captured.capturedAt > current.capturedAt
     ? { kind: 'refreshed', snapshot: captured }
-    : { kind: 'switched', snapshot: captured };
+    : { kind: 'unchanged' };
 }
