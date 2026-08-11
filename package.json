@@ -5,6 +5,9 @@
   "type": "module",
   "description": "A Chrome side-panel interviewer for LeetCode practice: incremental hints, never the answer.",
   "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "build": "pnpm build:panel && pnpm build:worker && pnpm build:content && pnpm build:bridge && pnpm build:host",
     "build:panel": "SOCRATES_TARGET=panel vite build",
